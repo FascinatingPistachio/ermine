@@ -292,6 +292,7 @@ function AppShell() {
   const subscriptionRef = useRef({});
   const preloadedChannelRef = useRef({});
   const preloadedMembersRef = useRef({});
+  const pendingUserFetchRef = useRef(new Set());
 
   const serverList = useMemo(() => Object.values(servers), [servers]);
 
@@ -326,6 +327,60 @@ function AppShell() {
     () => Object.values(users).filter((u) => u.relationship === 'Friend' || u.relationship === 1),
     [users],
   );
+
+  const upsertUsers = (list = []) => {
+    if (!list.length) return;
+    setUsers((prev) => {
+      const next = { ...prev };
+      list.forEach((user) => {
+        if (user?._id) next[user._id] = user;
+      });
+      return next;
+    });
+  };
+
+  const upsertUsersFromMessages = (messageList = []) => {
+    const embeddedUsers = [];
+
+    messageList.forEach((entry) => {
+      const author = entry?.author;
+      if (author && typeof author === 'object' && author._id) embeddedUsers.push(author);
+      if (entry?.user?._id) embeddedUsers.push(entry.user);
+    });
+
+    upsertUsers(embeddedUsers);
+  };
+
+  const fetchMissingUsers = async (messageList = []) => {
+    const unresolved = new Set();
+
+    messageList.forEach((entry) => {
+      const authorId = typeof entry?.author === 'string' ? entry.author : entry?.author?._id;
+      if (!authorId || users[authorId] || pendingUserFetchRef.current.has(authorId)) return;
+      unresolved.add(authorId);
+    });
+
+    if (!unresolved.size) return;
+
+    unresolved.forEach((id) => pendingUserFetchRef.current.add(id));
+
+    await Promise.all(
+      [...unresolved].map(async (userId) => {
+        try {
+          const res = await fetch(`${config.apiUrl}/users/${userId}`, {
+            headers: { 'x-session-token': auth.token },
+          });
+          if (!res.ok) return;
+          const data = await res.json();
+          if (data?._id) upsertUsers([data]);
+        } catch {
+          // no-op
+        } finally {
+          pendingUserFetchRef.current.delete(userId);
+        }
+      }),
+    );
+  };
 
   const discoverConfig = async (apiUrl) => {
     try {
@@ -408,12 +463,8 @@ function AppShell() {
         logout();
         break;
       case 'Message':
-        if (packet.user?._id) {
-          setUsers((prev) => ({ ...prev, [packet.user._id]: packet.user }));
-        }
-        if (typeof packet.author === 'object' && packet.author?._id) {
-          setUsers((prev) => ({ ...prev, [packet.author._id]: packet.author }));
-        }
+        upsertUsersFromMessages([packet]);
+        void fetchMissingUsers([packet]);
         setMessages((prev) => {
           const list = prev[packet.channel] || [];
           if (list.find((m) => m._id === packet._id)) return prev;
@@ -589,10 +640,12 @@ function AppShell() {
     }
   };
 
-  const enrichReplies = (nextMessages) =>
-    nextMessages.map((message) => {
+  const enrichReplies = (nextMessages) => {
+    const messageById = Object.fromEntries(nextMessages.map((entry) => [entry._id, entry]));
+
+    return nextMessages.map((message) => {
       const replyId = Array.isArray(message.replies) ? message.replies[0] : null;
-      const replyMessage = replyId ? nextMessages.find((entry) => entry._id === replyId) : null;
+      const replyMessage = replyId ? messageById[replyId] : null;
       if (!replyMessage) return message;
       const replyAuthorId = typeof replyMessage.author === 'string' ? replyMessage.author : replyMessage.author?._id;
 
@@ -606,6 +659,7 @@ function AppShell() {
         },
       };
     });
+  };
 
   const fetchMessages = async (channelId) => {
     if (!channelId || channelId === 'friends') return;
@@ -621,17 +675,13 @@ function AppShell() {
       const payloadUsers = Array.isArray(data) ? [] : data.users || [];
 
       if (payloadUsers.length) {
-        setUsers((prev) => {
-          const next = { ...prev };
-          payloadUsers.forEach((u) => {
-            next[u._id] = u;
-          });
-          return next;
-        });
+        upsertUsers(payloadUsers);
       }
 
+      upsertUsersFromMessages(payloadMessages);
       const orderedMessages = payloadMessages.reverse().slice(-200);
       setMessages((prev) => ({ ...prev, [channelId]: enrichReplies(orderedMessages) }));
+      void fetchMissingUsers(orderedMessages);
       preloadedChannelRef.current[channelId] = true;
     } catch {
       // no-op
@@ -641,15 +691,18 @@ function AppShell() {
   useEffect(() => {
     if (status !== 'ready' || !auth.token) return;
 
+    if (document.visibilityState !== 'visible') return;
+
+    const maxWarmChannels = Math.min(8, Math.max(3, Math.floor((navigator.hardwareConcurrency || 4) / 2)));
     const channelsToWarm = Object.values(channels)
       .filter((channel) => channel?.channel_type === 'TextChannel' || !channel?.channel_type)
-      .slice(0, 25);
+      .slice(0, maxWarmChannels);
 
     channelsToWarm.forEach((channel, index) => {
       if (!channel?._id || preloadedChannelRef.current[channel._id]) return;
       setTimeout(() => {
         fetchMessages(channel._id);
-      }, index * 120);
+      }, index * 350);
     });
 
     Object.values(servers).forEach((server) => {
@@ -743,6 +796,7 @@ function AppShell() {
     setMembers({});
     preloadedChannelRef.current = {};
     preloadedMembersRef.current = {};
+    pendingUserFetchRef.current = new Set();
     setView('login');
     setStatus('disconnected');
   };
