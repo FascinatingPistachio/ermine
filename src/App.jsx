@@ -14,9 +14,18 @@ import {
   X,
 } from 'lucide-react';
 
-const DEFAULT_API_URL = 'https://api.stoat.chat';
-const DEFAULT_WS_URL = 'wss://stoat.chat/events';
-const DEFAULT_CDN_URL = 'https://autumn.revolt.chat';
+const getRuntimeConfig = () => {
+  const runtime = typeof window !== 'undefined' ? window.__ERMINE_CONFIG__ || {} : {};
+  const env = typeof import.meta !== 'undefined' ? import.meta.env || {} : {};
+
+  return {
+    apiUrl: runtime.apiUrl || env.VITE_STOAT_API_URL || 'https://api.stoat.chat',
+    wsUrl: runtime.wsUrl || env.VITE_STOAT_WS_URL || 'wss://stoat.chat/events',
+    cdnUrl: runtime.cdnUrl || env.VITE_STOAT_CDN_URL || 'https://autumn.revolt.chat',
+  };
+};
+
+const { apiUrl: DEFAULT_API_URL, wsUrl: DEFAULT_WS_URL, cdnUrl: DEFAULT_CDN_URL } = getRuntimeConfig();
 
 const inputBase =
   'w-full rounded-md border border-[#202225] bg-[#111214] px-3 py-2 text-sm text-gray-100 placeholder:text-gray-500 focus:border-[#5865f2] focus:outline-none focus:ring-1 focus:ring-[#5865f2]';
