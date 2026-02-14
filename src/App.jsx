@@ -66,16 +66,13 @@ const toDateLabel = (value) => {
 };
 
 
-const shouldTrustLink = (url) => window.confirm(`Do you trust this link?
-
-${url}`);
-
-const LinkAnchor = ({ href, children, className = 'text-[#8ea1ff] underline hover:text-[#bdc3ff]' }) => (
+const LinkAnchor = ({ href, children, onRequestOpenLink, className = 'text-[#8ea1ff] underline hover:text-[#bdc3ff]' }) => (
   <a
     className={className}
     href={href}
     onClick={(event) => {
-      if (!shouldTrustLink(href)) event.preventDefault();
+      event.preventDefault();
+      if (onRequestOpenLink) onRequestOpenLink(href);
     }}
     rel="noreferrer"
     target="_blank"
@@ -84,19 +81,19 @@ const LinkAnchor = ({ href, children, className = 'text-[#8ea1ff] underline hove
   </a>
 );
 
-const renderLinksInText = (value, keyPrefix = 'link') => {
+const renderLinksInText = (value, keyPrefix = 'link', onRequestOpenLink = null) => {
   if (!value) return null;
   const parts = value.split(/(https?:\/\/[^\s]+)/gi);
   return parts.map((part, index) => {
     if (!part) return null;
     if (/^https?:\/\//i.test(part)) {
-      return <LinkAnchor href={part} key={`${keyPrefix}-${index}`}>{part}</LinkAnchor>;
+      return <LinkAnchor href={part} key={`${keyPrefix}-${index}`} onRequestOpenLink={onRequestOpenLink}>{part}</LinkAnchor>;
     }
     return <React.Fragment key={`${keyPrefix}-${index}`}>{part}</React.Fragment>;
   });
 };
 
-const renderMarkdownInline = (text, keyPrefix = 'md') => {
+const renderMarkdownInline = (text, keyPrefix = 'md', onRequestOpenLink = null) => {
   if (!text) return null;
   const tokens = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|__[^_]+__|~~[^~]+~~|\[[^\]]+\]\([^\)]+\))/g);
 
@@ -125,10 +122,10 @@ const renderMarkdownInline = (text, keyPrefix = 'md') => {
 
     const markdownLink = token.match(/^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/i);
     if (markdownLink) {
-      return <LinkAnchor href={markdownLink[2]} key={`${keyPrefix}-${index}`}>{markdownLink[1]}</LinkAnchor>;
+      return <LinkAnchor href={markdownLink[2]} key={`${keyPrefix}-${index}`} onRequestOpenLink={onRequestOpenLink}>{markdownLink[1]}</LinkAnchor>;
     }
 
-    return <React.Fragment key={`${keyPrefix}-${index}`}>{renderLinksInText(token, `${keyPrefix}-plain-${index}`)}</React.Fragment>;
+    return <React.Fragment key={`${keyPrefix}-${index}`}>{renderLinksInText(token, `${keyPrefix}-plain-${index}`, onRequestOpenLink)}</React.Fragment>;
   });
 };
 
@@ -206,7 +203,16 @@ const getAttachmentData = (attachment, cdnUrl, index = 0) => {
   return { attachmentId, filename, url, image };
 };
 
-const renderMessageContent = (content, users, channels, onUserClick, customEmojiById, cdnUrl) => {
+
+const extractUrls = (value = '') => (value.match(/https?:\/\/[^\s]+/gi) || []);
+
+const isEmbeddableGifLink = (url) => {
+  if (!url) return false;
+  if (/^https?:\/\/media\.tenor\.com\//i.test(url)) return true;
+  return /\.(gif)(\?.*)?$/i.test(url);
+};
+
+const renderMessageContent = (content, users, channels, onUserClick, customEmojiById, cdnUrl, onRequestOpenLink) => {
   if (!content) return null;
 
   const parts = content.split(/(<@!?[A-Za-z0-9]+>|<#[A-Za-z0-9]+>|:[A-Za-z0-9_+-]+:)/g);
@@ -254,7 +260,7 @@ const renderMessageContent = (content, users, channels, onUserClick, customEmoji
       return EMOJI_SHORTCODES[emoji[1].toLowerCase()] || part;
     }
 
-    return <React.Fragment key={`${part}-${index}`}>{renderMarkdownInline(part, `md-${index}`)}</React.Fragment>;
+    return <React.Fragment key={`${part}-${index}`}>{renderMarkdownInline(part, `md-${index}`, onRequestOpenLink)}</React.Fragment>;
   });
 };
 
@@ -347,7 +353,7 @@ class AppErrorBoundary extends React.Component {
   }
 }
 
-const Message = ({ message, users, channels, me, onUserClick, cdnUrl, onToggleReaction, onReply, replyTarget, onJumpToMessage, registerMessageRef, customEmojiById, reactionOptions }) => {
+const Message = ({ message, users, channels, me, onUserClick, cdnUrl, onToggleReaction, onReply, replyTarget, onJumpToMessage, registerMessageRef, customEmojiById, reactionOptions, onRequestOpenLink }) => {
   const authorId = typeof message.author === 'string' ? message.author : message.author?._id;
   const author = users[authorId] || (typeof message.author === 'object' ? message.author : null) || { username: 'Unknown user' };
   const mine = me === authorId;
@@ -355,6 +361,7 @@ const Message = ({ message, users, channels, me, onUserClick, cdnUrl, onToggleRe
   const replyPreview = message.replyMessage;
   const [showReactionPicker, setShowReactionPicker] = useState(false);
   const [isMessageHovered, setIsMessageHovered] = useState(false);
+  const embeddedGifUrls = useMemo(() => extractUrls(message.content || '').filter(isEmbeddableGifLink), [message.content]);
 
   return (
     <article className="group flex gap-3 rounded px-4 py-2 hover:bg-[#2e3035]" onMouseEnter={() => setIsMessageHovered(true)} onMouseLeave={() => setIsMessageHovered(false)} ref={(node) => registerMessageRef(message._id, node)}>
@@ -380,7 +387,16 @@ const Message = ({ message, users, channels, me, onUserClick, cdnUrl, onToggleRe
           <time className="text-[11px] text-gray-500">{toTime(message.createdAt)}</time>
         </div>
         {message.content ? (
-          <p className="whitespace-pre-wrap break-words text-sm text-gray-200">{renderMessageContent(message.content, users, channels, onUserClick, customEmojiById, cdnUrl)}</p>
+          <p className="whitespace-pre-wrap break-words text-sm text-gray-200">{renderMessageContent(message.content, users, channels, onUserClick, customEmojiById, cdnUrl, onRequestOpenLink)}</p>
+        ) : null}
+        {embeddedGifUrls.length ? (
+          <div className="mt-1.5 flex flex-wrap gap-2">
+            {embeddedGifUrls.slice(0, 3).map((url) => (
+              <button className="block overflow-hidden rounded border border-[#3a3d42]" key={url} onClick={() => onRequestOpenLink(url)} title={url} type="button">
+                <img alt="Embedded GIF" className="max-h-52 max-w-[320px] object-contain" src={url} />
+              </button>
+            ))}
+          </div>
         ) : null}
         {Array.isArray(message.attachments) && message.attachments.length ? (
           <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -490,6 +506,10 @@ function AppShell() {
   const [isUploadingFiles, setIsUploadingFiles] = useState(false);
   const [voiceNotice, setVoiceNotice] = useState('');
   const [showGoLatest, setShowGoLatest] = useState(false);
+  const [linkPromptUrl, setLinkPromptUrl] = useState(null);
+  const [statusDraft, setStatusDraft] = useState({ presence: 'Online', text: '' });
+  const [isSavingStatus, setIsSavingStatus] = useState(false);
+  const [isAccountHovered, setIsAccountHovered] = useState(false);
 
   const [loginMode, setLoginMode] = useState('credentials');
   const [email, setEmail] = useState('');
@@ -1269,6 +1289,59 @@ function AppShell() {
     setShowGoLatest(false);
   };
 
+  const requestOpenLink = (url) => {
+    setLinkPromptUrl(url);
+  };
+
+  const confirmOpenLink = () => {
+    if (!linkPromptUrl) return;
+    window.open(linkPromptUrl, '_blank', 'noopener,noreferrer');
+    setLinkPromptUrl(null);
+  };
+
+  const openStatusEditor = () => {
+    const currentPresence = users[auth.userId]?.status?.presence || 'Online';
+    const currentText = users[auth.userId]?.status?.text || '';
+    setStatusDraft({ presence: currentPresence, text: currentText });
+    setActiveModal('set-status');
+  };
+
+  const saveStatus = async () => {
+    setIsSavingStatus(true);
+
+    setUsers((prev) => ({
+      ...prev,
+      [auth.userId]: {
+        ...(prev[auth.userId] || {}),
+        status: {
+          presence: statusDraft.presence,
+          text: statusDraft.text || undefined,
+        },
+      },
+    }));
+
+    try {
+      await fetch(`${config.apiUrl}/users/@me`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-session-token': auth.token,
+        },
+        body: JSON.stringify({
+          status: {
+            presence: statusDraft.presence,
+            text: statusDraft.text || undefined,
+          },
+        }),
+      });
+    } catch {
+      // no-op
+    } finally {
+      setIsSavingStatus(false);
+      setActiveModal(null);
+    }
+  };
+
   const handleLogin = async (event) => {
     event.preventDefault();
     setLoginError('');
@@ -1637,6 +1710,41 @@ function AppShell() {
         </Modal>
       ) : null}
 
+      {activeModal === 'set-status' ? (
+        <Modal onClose={() => setActiveModal(null)} title="Set your status">
+          <label className="block text-xs font-semibold uppercase tracking-wide text-gray-400">
+            Presence
+            <select className={`${inputBase} mt-1`} onChange={(event) => setStatusDraft((prev) => ({ ...prev, presence: event.target.value }))} value={statusDraft.presence}>
+              <option value="Online">Online</option>
+              <option value="Idle">Idle</option>
+              <option value="Busy">Busy</option>
+              <option value="Invisible">Invisible</option>
+            </select>
+          </label>
+          <label className="block text-xs font-semibold uppercase tracking-wide text-gray-400">
+            Custom status
+            <input className={`${inputBase} mt-1`} maxLength={128} onChange={(event) => setStatusDraft((prev) => ({ ...prev, text: event.target.value }))} placeholder="What's up?" value={statusDraft.text} />
+          </label>
+          <button className="w-full rounded-md bg-[#5865f2] py-2 text-sm font-semibold text-white hover:bg-[#4956d8]" disabled={isSavingStatus} onClick={saveStatus} type="button">
+            {isSavingStatus ? 'Saving…' : 'Save status'}
+          </button>
+        </Modal>
+      ) : null}
+
+      {linkPromptUrl ? (
+        <Modal onClose={() => setLinkPromptUrl(null)} title="Ermine link check">
+          <div className="rounded-md bg-[#1e1f22] p-3 text-sm text-gray-200">
+            <p className="text-xs uppercase tracking-wide text-gray-500">Do you trust this link?</p>
+            <p className="mt-2 break-all text-[#bdc3ff]">{linkPromptUrl}</p>
+            <p className="mt-2 text-xs text-gray-400">Ermine says: only open links from people and servers you trust.</p>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button className="rounded-md bg-[#3a3d42] py-2 text-sm font-semibold text-gray-200 hover:bg-[#4a4d55]" onClick={() => setLinkPromptUrl(null)} type="button">Cancel</button>
+            <button className="rounded-md bg-[#5865f2] py-2 text-sm font-semibold text-white hover:bg-[#4956d8]" onClick={confirmOpenLink} type="button">Open link</button>
+          </div>
+        </Modal>
+      ) : null}
+
       {peekUser ? (
         <Modal onClose={() => setPeekUser(null)} title="Member profile">
           <div className="overflow-hidden rounded-lg bg-[#1e1f22]">
@@ -1751,14 +1859,14 @@ function AppShell() {
         </div>
 
         <div className="border-t border-[#202225] p-2">
-          <div className="flex items-center justify-between rounded bg-[#232428] p-2">
-            <div className="flex items-center gap-2">
-              <Avatar animateOnHover cdnUrl={config.cdnUrl} size="sm" user={users[auth.userId]} />
+          <div className="flex items-center justify-between rounded bg-[#232428] p-2" onMouseEnter={() => setIsAccountHovered(true)} onMouseLeave={() => setIsAccountHovered(false)}>
+            <button className="flex min-w-0 items-center gap-2 rounded p-1 text-left hover:bg-[#2d3036]" onClick={openStatusEditor} type="button">
+              <Avatar alwaysAnimate={isAccountHovered} cdnUrl={config.cdnUrl} size="sm" user={users[auth.userId]} />
               <div className="min-w-0">
                 <div className="truncate text-xs font-semibold text-white">{users[auth.userId]?.username || 'Connected'}</div>
-                <div className="text-[10px] uppercase tracking-wide text-gray-400">{status}</div>
+                <div className="truncate text-[10px] uppercase tracking-wide text-gray-400">{users[auth.userId]?.status?.text || status}</div>
               </div>
-            </div>
+            </button>
             <button className="rounded p-1 text-gray-400 hover:bg-[#35373c] hover:text-white" onClick={logout} title="Logout">
               <LogOut size={14} />
             </button>
@@ -1808,6 +1916,7 @@ function AppShell() {
                 onToggleReaction={toggleReaction}
                 onUserClick={openUserProfile}
                 onJumpToMessage={jumpToMessage}
+                onRequestOpenLink={requestOpenLink}
                 reactionOptions={reactionOptions}
                 registerMessageRef={registerMessageRef}
                 replyTarget={replyingTo?._id}
