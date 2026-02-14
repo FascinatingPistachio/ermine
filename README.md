@@ -43,3 +43,16 @@ Use your existing React/Tailwind host setup to run it locally.
 ## Brand direction
 
 This app is intentionally branded as **Ermine**, designed for the **stoat.chat** ecosystem while keeping a familiar Discord-like interaction model.
+
+
+## Deploying on Vercel
+
+This project includes a `vercel.json` SPA rewrite so deep links resolve correctly to `index.html`.
+
+For environment-specific endpoints, set these Vercel environment variables:
+
+- `VITE_STOAT_API_URL`
+- `VITE_STOAT_WS_URL`
+- `VITE_STOAT_CDN_URL`
+
+The app will use those values at build time, while still allowing manual overrides from **Advanced connection settings** on the login screen.
