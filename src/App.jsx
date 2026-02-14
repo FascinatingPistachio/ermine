@@ -65,6 +65,10 @@ const EMOJI_SHORTCODES = {
 };
 
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '🔥', '😭', '🎉', '😮', '👀', '🤔'];
+const EXTENDED_EMOJIS = [
+  ...QUICK_EMOJIS,
+  '😄', '😁', '🤣', '😉', '🙏', '👏', '✨', '🎯', '💯', '🤝', '😅', '😎', '🥳', '✅', '❌', '🎵', '📌', '🚀', '🫡', '🤌',
+];
 const MEMBER_RENDER_LIMIT = 250;
 const MEMBER_HYDRATE_CHUNK = 400;
 
@@ -118,7 +122,7 @@ const renderMessageContent = (content, users, channels, onUserClick) => {
   });
 };
 
-const Avatar = ({ user, cdnUrl, size = 'md' }) => {
+const Avatar = ({ user, cdnUrl, size = 'md', animateOnHover = false, alwaysAnimate = false }) => {
   const sizeMap = {
     sm: 'h-8 w-8 text-xs',
     md: 'h-10 w-10 text-sm',
@@ -126,10 +130,21 @@ const Avatar = ({ user, cdnUrl, size = 'md' }) => {
   };
 
   const initials = (user?.username || '?').slice(0, 2).toUpperCase();
-  const src = getAvatarUrl(user, cdnUrl);
+  const [isHovered, setIsHovered] = useState(false);
+  const hasAnimatedAvatar = Boolean(user?.avatar?.animated);
+  const src = (() => {
+    if (!user?.avatar?._id) return null;
+    const wantsAnimated = hasAnimatedAvatar && (alwaysAnimate || (animateOnHover && isHovered));
+    const formatQuery = wantsAnimated ? '&format=gif' : '';
+    return `${cdnUrl}/avatars/${user.avatar._id}?max_side=256${formatQuery}`;
+  })();
 
   return (
-    <div className={`grid shrink-0 place-items-center overflow-hidden rounded-full bg-[#313338] font-semibold text-gray-200 ${sizeMap[size]}`}>
+    <div
+      className={`grid shrink-0 place-items-center overflow-hidden rounded-full bg-[#313338] font-semibold text-gray-200 ${sizeMap[size]}`}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
       {src ? <img alt={user?.username || 'User avatar'} className="block h-full w-full object-cover object-center" src={src} /> : initials}
     </div>
   );
@@ -198,7 +213,7 @@ class AppErrorBoundary extends React.Component {
   }
 }
 
-const Message = ({ message, users, channels, me, onUserClick, cdnUrl, onToggleReaction, onReply, replyTarget }) => {
+const Message = ({ message, users, channels, me, onUserClick, cdnUrl, onToggleReaction, onReply, replyTarget, onJumpToMessage, registerMessageRef }) => {
   const authorId = typeof message.author === 'string' ? message.author : message.author?._id;
   const author = users[authorId] || (typeof message.author === 'object' ? message.author : null) || { username: 'Unknown user' };
   const mine = me === authorId;
@@ -206,15 +221,15 @@ const Message = ({ message, users, channels, me, onUserClick, cdnUrl, onToggleRe
   const replyPreview = message.replyMessage;
 
   return (
-    <article className="group flex gap-3 rounded px-4 py-2 hover:bg-[#2e3035]">
+    <article className="group flex gap-3 rounded px-4 py-2 hover:bg-[#2e3035]" ref={(node) => registerMessageRef(message._id, node)}>
       <button className="mt-0.5" onClick={() => onUserClick(author, authorId)} type="button">
-        <Avatar cdnUrl={cdnUrl} user={author} />
+        <Avatar animateOnHover cdnUrl={cdnUrl} user={author} />
       </button>
       <div className="min-w-0 flex-1">
         {replyPreview ? (
           <button
             className="mb-1 flex max-w-full items-center gap-1 text-xs text-gray-400 hover:text-gray-200"
-            onClick={() => onUserClick(replyPreview.authorUser || { username: 'Unknown user' }, replyPreview.authorId)}
+            onClick={() => onJumpToMessage(replyPreview._id)}
             type="button"
           >
             <Reply size={12} />
@@ -281,6 +296,7 @@ function AppShell() {
   const [isMembersLoading, setIsMembersLoading] = useState(false);
   const [replyingTo, setReplyingTo] = useState(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [voiceNotice, setVoiceNotice] = useState('');
 
   const [loginMode, setLoginMode] = useState('credentials');
   const [email, setEmail] = useState('');
@@ -301,6 +317,7 @@ function AppShell() {
   const canFetchMissingUsersRef = useRef(true);
   const loggedMissingUserFetchErrorRef = useRef(false);
   const wsReconnectTimeoutRef = useRef(null);
+  const messageRefs = useRef({});
 
   const serverList = useMemo(() => Object.values(servers), [servers]);
 
@@ -308,6 +325,11 @@ function AppShell() {
     if (selectedServerId === '@me') return [];
     return Object.values(channels).filter((ch) => ch.server === selectedServerId);
   }, [channels, selectedServerId]);
+
+  const directMessageChannels = useMemo(
+    () => Object.values(channels).filter((channel) => channel?.channel_type === 'DirectMessage'),
+    [channels],
+  );
 
   const currentMessages = useMemo(() => messages[selectedChannelId] || [], [messages, selectedChannelId]);
   const currentMessageMap = useMemo(() => Object.fromEntries(currentMessages.map((message) => [message._id, message])), [currentMessages]);
@@ -341,6 +363,60 @@ function AppShell() {
     () => Object.values(users).filter((u) => u.relationship === 'Friend' || u.relationship === 1),
     [users],
   );
+
+  const selectedServer = servers[selectedServerId];
+
+  const customEmojis = useMemo(() => {
+    if (!selectedServer || selectedServerId === '@me') return [];
+    const source = selectedServer.emojis || selectedServer.emoji || [];
+    if (Array.isArray(source)) {
+      return source.map((entry) => ({
+        id: entry?._id || entry?.id,
+        name: entry?.name || entry?._id || 'emoji',
+      }));
+    }
+
+    return Object.entries(source).map(([id, value]) => ({
+      id,
+      name: value?.name || id,
+    }));
+  }, [selectedServer, selectedServerId]);
+
+
+  const peekMember = useMemo(() => {
+    if (!peekUser?._id || selectedServerId === '@me') return null;
+    return members[`${selectedServerId}:${peekUser._id}`] || null;
+  }, [members, peekUser, selectedServerId]);
+
+  const peekRoles = useMemo(() => {
+    if (!peekMember || !selectedServer?.roles) return [];
+    return (peekMember.roles || []).map((roleId) => selectedServer.roles?.[roleId]).filter(Boolean);
+  }, [peekMember, selectedServer]);
+
+  const peekBadges = useMemo(() => {
+    if (!peekUser?.badges) return [];
+    if (Array.isArray(peekUser.badges)) return peekUser.badges;
+    if (typeof peekUser.badges === 'number') {
+      const flagMap = {
+        1: 'Developer',
+        2: 'Translator',
+        4: 'Supporter',
+        8: 'Founder',
+        16: 'Platform Moderation',
+        32: 'Active Supporter',
+        64: 'Paw',
+      };
+      return Object.entries(flagMap)
+        .filter(([bit]) => (peekUser.badges & Number(bit)) === Number(bit))
+        .map(([, label]) => label);
+    }
+    if (typeof peekUser.badges === 'object') {
+      return Object.entries(peekUser.badges)
+        .filter(([, enabled]) => Boolean(enabled))
+        .map(([badge]) => badge);
+    }
+    return [];
+  }, [peekUser]);
 
   const isSameOriginApi = useMemo(() => {
     try {
@@ -665,6 +741,12 @@ function AppShell() {
     messagesBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [currentMessages]);
 
+  useEffect(() => {
+    if (!voiceNotice) return undefined;
+    const timeout = setTimeout(() => setVoiceNotice(''), 3500);
+    return () => clearTimeout(timeout);
+  }, [voiceNotice]);
+
   const fetchMembers = async (serverId) => {
     if (serverId === '@me') return;
 
@@ -784,7 +866,8 @@ function AppShell() {
       return;
     }
 
-    const firstChannel = Object.values(channels).find((ch) => ch.server === serverId);
+    const firstChannel = Object.values(channels).find((ch) => ch.server === serverId && ch.channel_type !== 'VoiceChannel')
+      || Object.values(channels).find((ch) => ch.server === serverId);
     setSelectedChannelId(firstChannel?._id || null);
     if (firstChannel?._id) fetchMessages(firstChannel._id);
     if (!preloadedMembersRef.current[serverId]) {
@@ -794,10 +877,69 @@ function AppShell() {
   };
 
   const handleChannelSelect = (channelId) => {
+    const channel = channels[channelId];
+    if (channel?.channel_type === 'VoiceChannel') {
+      setVoiceNotice("Ermine currently doesn't support voice channels.");
+      return;
+    }
+
+    setVoiceNotice('');
     setSelectedChannelId(channelId);
     setReplyingTo(null);
     setShowEmojiPicker(false);
     fetchMessages(channelId);
+  };
+
+  const openDmWithUser = async (userId) => {
+    if (!userId || !auth.token) return;
+
+    const existing = directMessageChannels.find((channel) =>
+      Array.isArray(channel?.recipients) && channel.recipients.includes(userId),
+    );
+
+    if (existing?._id) {
+      setSelectedServerId('@me');
+      handleChannelSelect(existing._id);
+      return;
+    }
+
+    try {
+      const res = await fetch(`${config.apiUrl}/users/${userId}/dm`, {
+        method: 'GET',
+        headers: { 'x-session-token': auth.token },
+      });
+
+      if (!res.ok) return;
+      const channel = await res.json();
+      if (!channel?._id) return;
+
+      setChannels((prev) => ({ ...prev, [channel._id]: channel }));
+      setSelectedServerId('@me');
+      setSelectedChannelId(channel._id);
+      fetchMessages(channel._id);
+    } catch {
+      // no-op
+    }
+  };
+
+  const jumpToMessage = (messageId) => {
+    if (!messageId) return;
+    const target = messageRefs.current[messageId];
+    if (!target) return;
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    target.classList.add('ring-2', 'ring-[#5865f2]', 'bg-[#3a3f66]/40');
+    setTimeout(() => {
+      target.classList.remove('ring-2', 'ring-[#5865f2]', 'bg-[#3a3f66]/40');
+    }, 1200);
+  };
+
+  const registerMessageRef = (messageId, node) => {
+    if (!messageId) return;
+    if (node) {
+      messageRefs.current[messageId] = node;
+    } else {
+      delete messageRefs.current[messageId];
+    }
   };
 
   const handleLogin = async (event) => {
@@ -880,9 +1022,27 @@ function AppShell() {
     if (!content || !selectedChannelId || selectedChannelId === 'friends') return;
 
     setInputText('');
+    const nonce = crypto.randomUUID();
+    const pendingId = `pending-${nonce}`;
+    const meUser = users[auth.userId] || { _id: auth.userId, username: 'You' };
+    const optimisticMessage = {
+      _id: pendingId,
+      channel: selectedChannelId,
+      author: auth.userId,
+      user: meUser,
+      content,
+      createdAt: new Date().toISOString(),
+      reactions: {},
+      replies: replyingTo ? [replyingTo._id] : undefined,
+    };
+
+    setMessages((prev) => {
+      const list = prev[selectedChannelId] || [];
+      return { ...prev, [selectedChannelId]: enrichReplies([...list, optimisticMessage].slice(-200)) };
+    });
 
     try {
-      await fetch(`${config.apiUrl}/channels/${selectedChannelId}/messages`, {
+      const res = await fetch(`${config.apiUrl}/channels/${selectedChannelId}/messages`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -890,13 +1050,29 @@ function AppShell() {
         },
         body: JSON.stringify({
           content,
-          nonce: crypto.randomUUID(),
+          nonce,
           replies: replyingTo ? [replyingTo._id] : undefined,
         }),
       });
+
+      if (!res.ok) throw new Error('Failed to send message');
+      const postedMessage = await res.json();
+
+      if (postedMessage?._id) {
+        upsertUsersFromMessages([postedMessage]);
+        setMessages((prev) => {
+          const list = (prev[selectedChannelId] || []).map((entry) => (entry._id === pendingId ? postedMessage : entry));
+          return { ...prev, [selectedChannelId]: enrichReplies(list) };
+        });
+      }
+
       setReplyingTo(null);
       setShowEmojiPicker(false);
     } catch {
+      setMessages((prev) => ({
+        ...prev,
+        [selectedChannelId]: (prev[selectedChannelId] || []).filter((entry) => entry._id !== pendingId),
+      }));
       setInputText(content);
     }
   };
@@ -939,6 +1115,11 @@ function AppShell() {
     setShowEmojiPicker(false);
   };
 
+  const addCustomEmojiToComposer = (emojiName) => {
+    setInputText((prev) => `${prev}:${emojiName}:`);
+    setShowEmojiPicker(false);
+  };
+
   const createServer = async () => {
     if (!createServerName.trim()) return;
 
@@ -963,8 +1144,16 @@ function AppShell() {
 
   const activeReply = replyingTo ? currentMessageMap[replyingTo._id] || replyingTo : null;
 
-  const currentChannelName =
-    selectedChannelId === 'friends' ? 'friends' : channels[selectedChannelId]?.name || 'select-a-channel';
+  const currentChannelName = (() => {
+    if (selectedChannelId === 'friends') return 'friends';
+    const channel = channels[selectedChannelId];
+    if (channel?.name) return channel.name;
+    if (channel?.channel_type === 'DirectMessage') {
+      const recipientId = (channel.recipients || []).find((id) => id !== auth.userId);
+      return users[recipientId]?.username || 'direct-message';
+    }
+    return 'select-a-channel';
+  })();
 
   if (view === 'loading') {
     return (
@@ -1063,13 +1252,43 @@ function AppShell() {
       {peekUser ? (
         <Modal onClose={() => setPeekUser(null)} title="Member profile">
           <div className="flex items-center gap-3 rounded-lg bg-[#1e1f22] p-3">
-            <Avatar cdnUrl={config.cdnUrl} size="lg" user={peekUser} />
+            <Avatar alwaysAnimate cdnUrl={config.cdnUrl} size="lg" user={peekUser} />
             <div>
               <div className="text-base font-semibold text-white">{peekUser?.username || 'Unknown user'}</div>
               <div className="text-xs text-gray-400">#{peekUser?.discriminator || '0000'}</div>
             </div>
           </div>
-          <p className="text-xs text-gray-400">Ermine profile popout for stoat.chat members.</p>
+
+          <div className="space-y-1 rounded-md bg-[#1e1f22] p-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">About me</p>
+            <p className="text-sm text-gray-200">{peekUser?.profile?.content || peekUser?.status?.text || 'This user has not set an About Me yet.'}</p>
+          </div>
+
+          <div className="space-y-1 rounded-md bg-[#1e1f22] p-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Badges</p>
+            {peekBadges.length ? (
+              <div className="flex flex-wrap gap-1.5">
+                {peekBadges.map((badge) => (
+                  <span className="rounded bg-[#5865f2]/20 px-2 py-1 text-xs text-[#d7ddff]" key={badge}>{badge}</span>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-400">No badges</p>
+            )}
+          </div>
+
+          <div className="space-y-1 rounded-md bg-[#1e1f22] p-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Roles</p>
+            {peekRoles.length ? (
+              <div className="flex flex-wrap gap-1.5">
+                {peekRoles.map((role) => (
+                  <span className="rounded bg-[#3a3d42] px-2 py-1 text-xs text-gray-200" key={role.name}>{role.name}</span>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-400">No server roles</p>
+            )}
+          </div>
         </Modal>
       ) : null}
 
@@ -1101,23 +1320,44 @@ function AppShell() {
         </div>
         <div className="flex-1 overflow-y-auto p-2">
           {selectedServerId === '@me' ? (
-            <button className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${selectedChannelId === 'friends' ? 'bg-[#404249] text-white' : 'text-gray-400 hover:bg-[#35373c] hover:text-white'}`} onClick={() => handleChannelSelect('friends')}>
-              <Users size={16} /> Friends
-            </button>
-          ) : (
-            channelList.map((channel) => (
-              <button className={`mb-0.5 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${selectedChannelId === channel._id ? 'bg-[#404249] text-white' : 'text-gray-400 hover:bg-[#35373c] hover:text-white'}`} key={channel._id} onClick={() => handleChannelSelect(channel._id)}>
-                <Hash size={16} />
-                <span className="truncate">{channel.name || 'channel'}</span>
+            <>
+              <button className={`mb-1 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${selectedChannelId === 'friends' ? 'bg-[#404249] text-white' : 'text-gray-400 hover:bg-[#35373c] hover:text-white'}`} onClick={() => handleChannelSelect('friends')}>
+                <Users size={16} /> Friends
               </button>
-            ))
+              {directMessageChannels.map((channel) => {
+                const recipientId = (channel.recipients || []).find((id) => id !== auth.userId);
+                const recipient = users[recipientId];
+                const label = recipient?.username || channel.name || 'Direct Message';
+                return (
+                  <button className={`mb-0.5 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${selectedChannelId === channel._id ? 'bg-[#404249] text-white' : 'text-gray-400 hover:bg-[#35373c] hover:text-white'}`} key={channel._id} onClick={() => handleChannelSelect(channel._id)}>
+                    <MessageSquare size={16} />
+                    <span className="truncate">{label}</span>
+                  </button>
+                );
+              })}
+            </>
+          ) : (
+            channelList.map((channel) => {
+              const isVoice = channel?.channel_type === 'VoiceChannel';
+              return (
+                <button
+                  className={`mb-0.5 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${isVoice ? 'cursor-not-allowed text-gray-500 hover:bg-[#2f3237]' : selectedChannelId === channel._id ? 'bg-[#404249] text-white' : 'text-gray-400 hover:bg-[#35373c] hover:text-white'}`}
+                  key={channel._id}
+                  onClick={() => handleChannelSelect(channel._id)}
+                  title={isVoice ? "Ermine currently doesn't support voice channels." : channel.name}
+                >
+                  {isVoice ? <Users size={16} /> : <Hash size={16} />}
+                  <span className="truncate">{channel.name || 'channel'}</span>
+                </button>
+              );
+            })
           )}
         </div>
 
         <div className="border-t border-[#202225] p-2">
           <div className="flex items-center justify-between rounded bg-[#232428] p-2">
             <div className="flex items-center gap-2">
-              <Avatar cdnUrl={config.cdnUrl} size="sm" user={users[auth.userId]} />
+              <Avatar animateOnHover cdnUrl={config.cdnUrl} size="sm" user={users[auth.userId]} />
               <div className="min-w-0">
                 <div className="truncate text-xs font-semibold text-white">{users[auth.userId]?.username || 'Connected'}</div>
                 <div className="text-[10px] uppercase tracking-wide text-gray-400">{status}</div>
@@ -1133,11 +1373,17 @@ function AppShell() {
       <main className="flex min-w-0 flex-1 flex-col bg-[#313338]">
         <header className="flex items-center justify-between border-b border-[#202225] px-4 py-3">
           <div className="flex items-center gap-2 text-sm font-semibold text-white">
-            <Hash size={17} className="text-gray-400" />
+            {channels[selectedChannelId]?.channel_type === 'DirectMessage' ? <MessageSquare size={17} className="text-gray-400" /> : <Hash size={17} className="text-gray-400" />}
             <span>{currentChannelName}</span>
           </div>
           <div className="text-xs text-gray-400">Ermine for stoat.chat</div>
         </header>
+
+        {voiceNotice ? (
+          <div className="mx-4 mt-3 rounded-md border border-[#665200] bg-[#5c4a00]/25 px-3 py-2 text-xs text-yellow-200">
+            {voiceNotice}
+          </div>
+        ) : null}
 
         <section className="flex-1 overflow-y-auto py-2">
           {selectedChannelId === 'friends' ? (
@@ -1145,8 +1391,8 @@ function AppShell() {
               <h2 className="text-xs font-bold uppercase tracking-wide text-gray-400">Friends ({friends.length})</h2>
               {friends.length === 0 ? <p className="text-sm text-gray-400">No friends available yet.</p> : null}
               {friends.map((friend) => (
-                <button className="flex w-full items-center gap-3 rounded bg-[#2b2d31] p-3 text-left hover:bg-[#35373c]" key={friend._id} onClick={() => openUserProfile(friend, friend._id)}>
-                  <Avatar cdnUrl={config.cdnUrl} user={friend} />
+                <button className="flex w-full items-center gap-3 rounded bg-[#2b2d31] p-3 text-left hover:bg-[#35373c]" key={friend._id} onClick={() => openDmWithUser(friend._id)}>
+                  <Avatar animateOnHover cdnUrl={config.cdnUrl} user={friend} />
                   <div className="min-w-0">
                     <div className="truncate text-sm font-semibold text-white">{friend.username}</div>
                     <div className="text-xs text-gray-400">Direct message</div>
@@ -1165,6 +1411,8 @@ function AppShell() {
                 onReply={setReplyingTo}
                 onToggleReaction={toggleReaction}
                 onUserClick={openUserProfile}
+                onJumpToMessage={jumpToMessage}
+                registerMessageRef={registerMessageRef}
                 replyTarget={replyingTo?._id}
                 users={users}
               />
@@ -1195,12 +1443,27 @@ function AppShell() {
                 <Smile size={16} />
               </button>
               {showEmojiPicker && selectedChannelId !== 'friends' ? (
-                <div className="absolute bottom-12 left-0 z-20 grid w-44 grid-cols-3 gap-1 rounded-lg border border-[#4c4f56] bg-[#232428] p-2 shadow-2xl">
-                  {QUICK_EMOJIS.map((emoji) => (
-                    <button className="rounded p-1.5 text-lg hover:bg-[#3a3d42]" key={emoji} onClick={() => addEmojiToComposer(emoji)} type="button">
-                      {emoji}
-                    </button>
-                  ))}
+                <div className="absolute bottom-12 left-0 z-20 w-60 rounded-lg border border-[#4c4f56] bg-[#232428] p-2 shadow-2xl">
+                  <p className="mb-1 text-[10px] uppercase tracking-wide text-gray-500">Emoji</p>
+                  <div className="grid max-h-36 grid-cols-6 gap-1 overflow-y-auto">
+                    {EXTENDED_EMOJIS.map((emoji) => (
+                      <button className="rounded p-1 text-lg hover:bg-[#3a3d42]" key={emoji} onClick={() => addEmojiToComposer(emoji)} type="button">
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                  {customEmojis.length ? (
+                    <>
+                      <p className="mb-1 mt-2 text-[10px] uppercase tracking-wide text-gray-500">Server emojis</p>
+                      <div className="flex max-h-24 flex-wrap gap-1 overflow-y-auto">
+                        {customEmojis.map((emoji) => (
+                          <button className="rounded bg-[#303239] px-1.5 py-1 text-xs text-gray-200 hover:bg-[#3a3d42]" key={emoji.id || emoji.name} onClick={() => addCustomEmojiToComposer(emoji.name)} type="button">
+                            :{emoji.name}:
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -1208,8 +1471,13 @@ function AppShell() {
               className="flex-1 bg-transparent px-2 py-1 text-sm text-gray-100 placeholder:text-gray-400 focus:outline-none"
               disabled={selectedChannelId === 'friends'}
               onChange={(e) => setInputText(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-              placeholder={selectedChannelId === 'friends' ? 'Select a text channel to chat.' : `Message #${currentChannelName}`}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  sendMessage();
+                }
+              }}
+              placeholder={selectedChannelId === 'friends' ? 'Select a text channel to chat.' : `Enter message in #${currentChannelName}`}
               value={inputText}
             />
             <button className="rounded p-2 text-gray-300 hover:bg-[#4b4d55] hover:text-white" onClick={sendMessage} type="button">
@@ -1227,7 +1495,7 @@ function AppShell() {
           {hiddenMembersCount > 0 ? <p className="px-2 py-1 text-[11px] text-gray-500">Showing first {currentMembers.length} members for responsiveness.</p> : null}
           {currentMembers.map((member) => (
             <button className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-[#35373c]" key={member._id.user} onClick={() => openUserProfile(member.user, member._id.user)}>
-              <Avatar cdnUrl={config.cdnUrl} size="sm" user={member.user} />
+              <Avatar animateOnHover cdnUrl={config.cdnUrl} size="sm" user={member.user} />
               <div className="min-w-0">
                 <div className="truncate text-sm text-gray-200">{member.nickname || member.user.username}</div>
                 <div className="flex items-center gap-1 text-[11px] text-gray-500">
@@ -1249,4 +1517,3 @@ export default function App() {
     </AppErrorBoundary>
   );
 }
-
