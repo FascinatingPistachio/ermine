@@ -46,6 +46,65 @@ const getIconUrl = (server, cdnUrl) => {
   return `${cdnUrl}/icons/${server.icon._id}`;
 };
 
+const EMOJI_SHORTCODES = {
+  smile: '😄',
+  grin: '😁',
+  joy: '😂',
+  rofl: '🤣',
+  wink: '😉',
+  heart: '❤️',
+  thumbs_up: '👍',
+  thumbs_down: '👎',
+  fire: '🔥',
+  sob: '😭',
+  thinking: '🤔',
+  tada: '🎉',
+  eyes: '👀',
+};
+
+const renderMessageContent = (content, users, channels, onUserClick) => {
+  if (!content) return null;
+
+  const parts = content.split(/(<@!?[A-Za-z0-9]+>|<#[A-Za-z0-9]+>|:[a-z0-9_+-]+:)/gi);
+
+  return parts.map((part, index) => {
+    if (!part) return null;
+
+    const userMention = part.match(/^<@!?([A-Za-z0-9]+)>$/);
+    if (userMention) {
+      const userId = userMention[1];
+      const user = users[userId];
+      return (
+        <button
+          className="mx-0.5 inline rounded bg-[#5865f2]/25 px-1 text-[#bdc3ff] hover:bg-[#5865f2]/35"
+          key={`${part}-${index}`}
+          onClick={() => onUserClick(user || { _id: userId, username: 'Unknown user' }, userId)}
+          type="button"
+        >
+          @{user?.username || 'unknown'}
+        </button>
+      );
+    }
+
+    const channelMention = part.match(/^<#([A-Za-z0-9]+)>$/);
+    if (channelMention) {
+      const channelId = channelMention[1];
+      return (
+        <span className="mx-0.5 inline rounded bg-[#3f4249] px-1 text-gray-100" key={`${part}-${index}`}>
+          #{channels[channelId]?.name || 'unknown-channel'}
+        </span>
+      );
+    }
+
+    const emoji = part.match(/^:([a-z0-9_+-]+):$/i);
+    if (emoji) {
+      return EMOJI_SHORTCODES[emoji[1].toLowerCase()] || part;
+    }
+
+    return <React.Fragment key={`${part}-${index}`}>{part}</React.Fragment>;
+  });
+};
+
 const Avatar = ({ user, cdnUrl, size = 'md' }) => {
   const sizeMap = {
     sm: 'h-8 w-8 text-xs',
@@ -87,7 +146,7 @@ const Modal = ({ title, onClose, children }) => (
   </div>
 );
 
-const Message = ({ message, users, me, onUserClick, cdnUrl }) => {
+const Message = ({ message, users, channels, me, onUserClick, cdnUrl }) => {
   const authorId = typeof message.author === 'string' ? message.author : message.author?._id;
   const author = users[authorId] || (typeof message.author === 'object' ? message.author : null) || { username: 'Unknown user' };
   const mine = me === authorId;
@@ -105,7 +164,9 @@ const Message = ({ message, users, me, onUserClick, cdnUrl }) => {
           {mine && <span className="rounded bg-[#5865f2]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[#bdc3ff]">YOU</span>}
           <time className="text-[11px] text-gray-500">{toTime(message.createdAt)}</time>
         </div>
-        {message.content ? <p className="whitespace-pre-wrap break-words text-sm text-gray-200">{message.content}</p> : null}
+        {message.content ? (
+          <p className="whitespace-pre-wrap break-words text-sm text-gray-200">{renderMessageContent(message.content, users, channels, onUserClick)}</p>
+        ) : null}
       </div>
     </article>
   );
@@ -143,6 +204,8 @@ export default function App() {
   const wsRef = useRef(null);
   const messagesBottomRef = useRef(null);
   const subscriptionRef = useRef({});
+  const preloadedChannelRef = useRef({});
+  const preloadedMembersRef = useRef({});
 
   const serverList = useMemo(() => Object.values(servers), [servers]);
 
@@ -267,7 +330,7 @@ export default function App() {
         setMessages((prev) => {
           const list = prev[packet.channel] || [];
           if (list.find((m) => m._id === packet._id)) return prev;
-          return { ...prev, [packet.channel]: [...list, packet] };
+          return { ...prev, [packet.channel]: [...list, packet].slice(-200) };
         });
         break;
       case 'MessageUpdate':
@@ -461,11 +524,33 @@ export default function App() {
         });
       }
 
-      setMessages((prev) => ({ ...prev, [channelId]: payloadMessages.reverse() }));
+      setMessages((prev) => ({ ...prev, [channelId]: payloadMessages.reverse().slice(-200) }));
+      preloadedChannelRef.current[channelId] = true;
     } catch {
       // no-op
     }
   };
+
+  useEffect(() => {
+    if (status !== 'ready' || !auth.token) return;
+
+    const channelsToWarm = Object.values(channels)
+      .filter((channel) => channel?.channel_type === 'TextChannel' || !channel?.channel_type)
+      .slice(0, 25);
+
+    channelsToWarm.forEach((channel, index) => {
+      if (!channel?._id || preloadedChannelRef.current[channel._id]) return;
+      setTimeout(() => {
+        fetchMessages(channel._id);
+      }, index * 120);
+    });
+
+    Object.values(servers).forEach((server) => {
+      if (!server?._id || preloadedMembersRef.current[server._id]) return;
+      preloadedMembersRef.current[server._id] = true;
+      fetchMembers(server._id);
+    });
+  }, [status, auth.token, channels, servers]);
 
   const handleServerSelect = (serverId) => {
     setSelectedServerId(serverId);
@@ -545,6 +630,8 @@ export default function App() {
     setChannels({});
     setUsers({});
     setMembers({});
+    preloadedChannelRef.current = {};
+    preloadedMembersRef.current = {};
     setView('login');
     setStatus('disconnected');
   };
@@ -784,7 +871,7 @@ export default function App() {
             </div>
           ) : (
             currentMessages.map((message) => (
-              <Message cdnUrl={config.cdnUrl} key={message._id} me={auth.userId} message={message} onUserClick={openUserProfile} users={users} />
+              <Message cdnUrl={config.cdnUrl} channels={channels} key={message._id} me={auth.userId} message={message} onUserClick={openUserProfile} users={users} />
             ))
           )}
           <div ref={messagesBottomRef} />
