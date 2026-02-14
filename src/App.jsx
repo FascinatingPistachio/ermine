@@ -151,6 +151,22 @@ const renderEmojiVisual = (token, customEmoji, cdnUrl) => {
   return token;
 };
 
+
+const isImageLike = (filename = '', contentType = '') => {
+  if (typeof contentType === 'string' && contentType.startsWith('image/')) return true;
+  return /\.(png|jpe?g|webp|gif|bmp|avif|svg)$/i.test(filename || '');
+};
+
+const getAttachmentData = (attachment, cdnUrl, index = 0) => {
+  const attachmentId = typeof attachment === 'string' ? attachment : attachment?._id || attachment?.id;
+  const filename = attachment?.filename || attachment?.name || `attachment-${index + 1}`;
+  const contentType = attachment?.content_type || attachment?.contentType || attachment?.metadata?.type || '';
+  const url = attachmentId ? `${cdnUrl}/attachments/${attachmentId}` : null;
+  const image = isImageLike(filename, contentType);
+
+  return { attachmentId, filename, url, image };
+};
+
 const renderMessageContent = (content, users, channels, onUserClick, customEmojiById, cdnUrl) => {
   if (!content) return null;
 
@@ -212,10 +228,9 @@ const Avatar = ({ user, cdnUrl, size = 'md', animateOnHover = false, alwaysAnima
 
   const initials = (user?.username || '?').slice(0, 2).toUpperCase();
   const [isHovered, setIsHovered] = useState(false);
-  const hasAnimatedAvatar = Boolean(user?.avatar?.animated);
   const src = (() => {
     if (!user?.avatar?._id) return null;
-    const wantsAnimated = hasAnimatedAvatar && (alwaysAnimate || (animateOnHover && isHovered));
+    const wantsAnimated = alwaysAnimate || (animateOnHover && isHovered);
     return wantsAnimated ? `${cdnUrl}/avatars/${user.avatar._id}/original` : `${cdnUrl}/avatars/${user.avatar._id}`;
   })();
 
@@ -330,18 +345,26 @@ const Message = ({ message, users, channels, me, onUserClick, cdnUrl, onToggleRe
         {Array.isArray(message.attachments) && message.attachments.length ? (
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             {message.attachments.map((attachment, index) => {
-              const attachmentId = typeof attachment === 'string' ? attachment : attachment?._id || attachment?.id;
-              const attachmentName = attachment?.filename || attachment?.name || `attachment-${index + 1}`;
-              if (!attachmentId) return null;
+              const { attachmentId, filename, url, image } = getAttachmentData(attachment, cdnUrl, index);
+              if (!attachmentId || !url) return null;
+
+              if (image) {
+                return (
+                  <a className="block overflow-hidden rounded border border-[#3a3d42]" href={url} key={attachmentId} rel="noreferrer" target="_blank" title={filename}>
+                    <img alt={filename} className="max-h-52 max-w-[320px] object-contain" src={url} />
+                  </a>
+                );
+              }
+
               return (
                 <a
                   className="rounded bg-[#232428] px-2 py-1 text-xs text-[#bdc3ff] hover:bg-[#2f3136]"
-                  href={`${cdnUrl}/attachments/${attachmentId}`}
+                  href={url}
                   key={attachmentId}
                   rel="noreferrer"
                   target="_blank"
                 >
-                  📎 {attachmentName}
+                  📎 {filename}
                 </a>
               );
             })}
@@ -1369,6 +1392,17 @@ function AppShell() {
     event.target.value = '';
   };
 
+  const handleComposerDrop = (event) => {
+    event.preventDefault();
+    const files = Array.from(event.dataTransfer?.files || []);
+    if (!files.length) return;
+    setPendingFiles((prev) => [...prev, ...files]);
+  };
+
+  const handleComposerDragOver = (event) => {
+    event.preventDefault();
+  };
+
   const removePendingFile = (index) => {
     setPendingFiles((prev) => prev.filter((_, fileIndex) => fileIndex !== index));
   };
@@ -1723,15 +1757,19 @@ function AppShell() {
           ) : null}
           {pendingFiles.length ? (
             <div className="mb-2 flex flex-wrap gap-1.5">
-              {pendingFiles.map((file, index) => (
-                <button className="rounded bg-[#2b2d31] px-2 py-1 text-xs text-gray-200 hover:bg-[#35373c]" key={`${file.name}-${index}`} onClick={() => removePendingFile(index)} type="button">
-                  📎 {file.name} <span className="text-gray-400">(remove)</span>
-                </button>
-              ))}
+              {pendingFiles.map((file, index) => {
+                const previewImage = isImageLike(file.name, file.type);
+                return (
+                  <button className="flex items-center gap-2 rounded bg-[#2b2d31] px-2 py-1 text-xs text-gray-200 hover:bg-[#35373c]" key={`${file.name}-${index}`} onClick={() => removePendingFile(index)} type="button">
+                    <span>{previewImage ? '🖼️' : '📎'}</span>
+                    <span>{file.name} <span className="text-gray-400">(remove)</span></span>
+                  </button>
+                );
+              })}
             </div>
           ) : null}
 
-          <div className="flex items-center gap-2 rounded-lg bg-[#383a40] p-2">
+          <div className="flex items-center gap-2 rounded-lg bg-[#383a40] p-2" onDragOver={handleComposerDragOver} onDrop={handleComposerDrop}>
             <button
               className="rounded p-2 text-gray-300 hover:bg-[#4b4d55] hover:text-white"
               disabled={selectedChannelId === 'friends' || isUploadingFiles}
