@@ -57,10 +57,20 @@ const Avatar = ({ user, cdnUrl, size = 'md' }) => {
   const src = getAvatarUrl(user, cdnUrl);
 
   return (
-    <div className={`grid place-items-center rounded-full bg-[#313338] font-semibold text-gray-200 ${sizeMap[size]}`}>
-      {src ? <img alt={user?.username || 'User avatar'} className="h-full w-full rounded-full object-cover" src={src} /> : initials}
+    <div className={`grid shrink-0 place-items-center overflow-hidden rounded-full bg-[#313338] font-semibold text-gray-200 ${sizeMap[size]}`}>
+      {src ? <img alt={user?.username || 'User avatar'} className="block h-full w-full object-cover object-center" src={src} /> : initials}
     </div>
   );
+};
+
+const withoutClearedFields = (base, clear = []) => {
+  if (!clear?.length) return base;
+  const next = { ...base };
+  clear.forEach((field) => {
+    const key = field?.[0]?.toLowerCase() + field?.slice(1);
+    if (key) delete next[key];
+  });
+  return next;
 };
 
 const Modal = ({ title, onClose, children }) => (
@@ -132,6 +142,7 @@ export default function App() {
 
   const wsRef = useRef(null);
   const messagesBottomRef = useRef(null);
+  const subscriptionRef = useRef({});
 
   const serverList = useMemo(() => Object.values(servers), [servers]);
 
@@ -199,6 +210,138 @@ export default function App() {
     }
   }, []);
 
+  const applyEvent = (packet) => {
+    if (!packet?.type) return;
+
+    switch (packet.type) {
+      case 'Ready':
+        setUsers((prev) => {
+          const next = { ...prev };
+          packet.users?.forEach((u) => {
+            next[u._id] = u;
+          });
+          return next;
+        });
+        setServers((prev) => {
+          const next = { ...prev };
+          packet.servers?.forEach((s) => {
+            next[s._id] = s;
+          });
+          return next;
+        });
+        setChannels((prev) => {
+          const next = { ...prev };
+          packet.channels?.forEach((c) => {
+            next[c._id] = c;
+          });
+          return next;
+        });
+        setMembers((prev) => {
+          const next = { ...prev };
+          packet.members?.forEach((m) => {
+            next[`${m._id.server}:${m._id.user}`] = m;
+          });
+          return next;
+        });
+        setStatus('ready');
+        break;
+      case 'Bulk':
+        packet.v?.forEach(applyEvent);
+        break;
+      case 'Authenticated':
+        setStatus('authenticated');
+        break;
+      case 'Error':
+        setStatus(`error:${packet.error || 'unknown'}`);
+        break;
+      case 'Logout':
+        logout();
+        break;
+      case 'Message':
+        if (packet.user?._id) {
+          setUsers((prev) => ({ ...prev, [packet.user._id]: packet.user }));
+        }
+        if (typeof packet.author === 'object' && packet.author?._id) {
+          setUsers((prev) => ({ ...prev, [packet.author._id]: packet.author }));
+        }
+        setMessages((prev) => {
+          const list = prev[packet.channel] || [];
+          if (list.find((m) => m._id === packet._id)) return prev;
+          return { ...prev, [packet.channel]: [...list, packet] };
+        });
+        break;
+      case 'MessageUpdate':
+        setMessages((prev) => ({
+          ...prev,
+          [packet.channel]: (prev[packet.channel] || []).map((m) => (m._id === packet.id ? { ...m, ...packet.data } : m)),
+        }));
+        break;
+      case 'MessageDelete':
+        setMessages((prev) => ({
+          ...prev,
+          [packet.channel]: (prev[packet.channel] || []).filter((m) => m._id !== packet.id),
+        }));
+        break;
+      case 'ChannelCreate':
+        setChannels((prev) => ({ ...prev, [packet._id]: packet }));
+        break;
+      case 'ChannelUpdate':
+        setChannels((prev) => ({
+          ...prev,
+          [packet.id]: withoutClearedFields({ ...prev[packet.id], ...packet.data }, packet.clear),
+        }));
+        break;
+      case 'ChannelDelete':
+        setChannels((prev) => {
+          const next = { ...prev };
+          delete next[packet.id];
+          return next;
+        });
+        break;
+      case 'ServerCreate':
+        setServers((prev) => ({ ...prev, [packet._id]: packet }));
+        break;
+      case 'ServerUpdate':
+        setServers((prev) => ({
+          ...prev,
+          [packet.id]: withoutClearedFields({ ...prev[packet.id], ...packet.data }, packet.clear),
+        }));
+        break;
+      case 'ServerDelete':
+        setServers((prev) => {
+          const next = { ...prev };
+          delete next[packet.id];
+          return next;
+        });
+        break;
+      case 'ServerMemberUpdate': {
+        const key = `${packet.id.server}:${packet.id.user}`;
+        setMembers((prev) => ({
+          ...prev,
+          [key]: withoutClearedFields({ ...prev[key], _id: packet.id, ...packet.data }, packet.clear),
+        }));
+        break;
+      }
+      case 'ServerMemberJoin':
+        setMembers((prev) => ({ ...prev, [`${packet.id}:${packet.user}`]: { ...packet.member, _id: { server: packet.id, user: packet.user } } }));
+        break;
+      case 'ServerMemberLeave':
+        setMembers((prev) => {
+          const next = { ...prev };
+          delete next[`${packet.id}:${packet.user}`];
+          return next;
+        });
+        break;
+      case 'UserUpdate':
+        setUsers((prev) => ({
+          ...prev,
+          [packet.id]: withoutClearedFields({ ...prev[packet.id], ...packet.data }, packet.clear),
+        }));
+        break;
+      default:
+    }
+  };
+
   useEffect(() => {
     if (!auth.token || view !== 'app') return undefined;
 
@@ -222,91 +365,7 @@ export default function App() {
     socket.onerror = () => setStatus('error');
     socket.onclose = () => setStatus((prev) => (prev === 'error' ? prev : 'disconnected'));
 
-    socket.onmessage = (event) => {
-      const packet = JSON.parse(event.data);
-
-      switch (packet.type) {
-        case 'Ready':
-          setUsers((prev) => {
-            const next = { ...prev };
-            packet.users?.forEach((u) => {
-              next[u._id] = u;
-            });
-            return next;
-          });
-          setServers((prev) => {
-            const next = { ...prev };
-            packet.servers?.forEach((s) => {
-              next[s._id] = s;
-            });
-            return next;
-          });
-          setChannels((prev) => {
-            const next = { ...prev };
-            packet.channels?.forEach((c) => {
-              next[c._id] = c;
-            });
-            return next;
-          });
-          setMembers((prev) => {
-            const next = { ...prev };
-            packet.members?.forEach((m) => {
-              next[`${m._id.server}:${m._id.user}`] = m;
-            });
-            return next;
-          });
-          setStatus('ready');
-          break;
-        case 'Bulk':
-          packet.v?.forEach((event) => {
-            if (event.type === 'UserUpdate') {
-              setUsers((prev) => ({ ...prev, [event.id]: { ...prev[event.id], ...event.data } }));
-            }
-            if (event.type === 'ServerMemberUpdate' && event.data) {
-              setMembers((prev) => ({
-                ...prev,
-                [`${event.id.server}:${event.id.user}`]: {
-                  ...prev[`${event.id.server}:${event.id.user}`],
-                  _id: event.id,
-                  ...event.data,
-                },
-              }));
-            }
-          });
-          break;
-        case 'Message':
-          if (packet.user?._id) {
-            setUsers((prev) => ({ ...prev, [packet.user._id]: packet.user }));
-          }
-          if (typeof packet.author === 'object' && packet.author?._id) {
-            setUsers((prev) => ({ ...prev, [packet.author._id]: packet.author }));
-          }
-          setMessages((prev) => {
-            const list = prev[packet.channel] || [];
-            if (list.find((m) => m._id === packet._id)) return prev;
-            return { ...prev, [packet.channel]: [...list, packet] };
-          });
-          break;
-        case 'MessageUpdate':
-          setMessages((prev) => ({
-            ...prev,
-            [packet.channelId]: (prev[packet.channelId] || []).map((m) =>
-              m._id === packet.id ? { ...m, ...packet.data } : m,
-            ),
-          }));
-          break;
-        case 'MessageDelete':
-          setMessages((prev) => ({
-            ...prev,
-            [packet.channelId]: (prev[packet.channelId] || []).filter((m) => m._id !== packet.id),
-          }));
-          break;
-        case 'UserUpdate':
-          setUsers((prev) => ({ ...prev, [packet.id]: { ...prev[packet.id], ...packet.data } }));
-          break;
-        default:
-      }
-    };
+    socket.onmessage = (event) => applyEvent(JSON.parse(event.data));
 
     const heartbeat = setInterval(() => {
       if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'Ping', data: Date.now() }));
@@ -317,6 +376,34 @@ export default function App() {
       socket.close();
     };
   }, [auth.token, config.wsUrl, view]);
+
+  useEffect(() => {
+    const socket = wsRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN || selectedServerId === '@me') return undefined;
+
+    const sendSubscribe = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (!window.document.hasFocus()) return;
+
+      const lastSent = subscriptionRef.current[selectedServerId] || 0;
+      const tenMinutes = 10 * 60 * 1000;
+      if (Date.now() - lastSent < tenMinutes) return;
+
+      socket.send(JSON.stringify({ type: 'Subscribe', server_id: selectedServerId }));
+      subscriptionRef.current[selectedServerId] = Date.now();
+    };
+
+    sendSubscribe();
+    window.addEventListener('focus', sendSubscribe);
+    document.addEventListener('visibilitychange', sendSubscribe);
+    const interval = setInterval(sendSubscribe, 60 * 1000);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', sendSubscribe);
+      document.removeEventListener('visibilitychange', sendSubscribe);
+    };
+  }, [selectedServerId, status]);
 
   useEffect(() => {
     messagesBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
