@@ -6,9 +6,11 @@ import {
   LogOut,
   MessageSquare,
   Plus,
+  Reply,
   Send,
   Settings,
   ShieldCheck,
+  Smile,
   User,
   Users,
   X,
@@ -60,6 +62,17 @@ const EMOJI_SHORTCODES = {
   thinking: '🤔',
   tada: '🎉',
   eyes: '👀',
+};
+
+const QUICK_EMOJIS = ['👍', '❤️', '😂', '🔥', '😭', '🎉', '😮', '👀', '🤔'];
+const MEMBER_RENDER_LIMIT = 250;
+const MEMBER_HYDRATE_CHUNK = 400;
+
+const toReactionEntries = (reactions) => {
+  if (!reactions || typeof reactions !== 'object') return [];
+  return Object.entries(reactions)
+    .map(([emoji, userIds]) => ({ emoji, userIds: Array.isArray(userIds) ? userIds : [] }))
+    .filter((entry) => entry.userIds.length > 0);
 };
 
 const renderMessageContent = (content, users, channels, onUserClick) => {
@@ -146,19 +159,70 @@ const Modal = ({ title, onClose, children }) => (
   </div>
 );
 
-const Message = ({ message, users, channels, me, onUserClick, cdnUrl }) => {
+
+class AppErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error) {
+    console.error('Ermine crashed:', error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="grid min-h-screen place-items-center bg-[#1e1f22] p-6 text-gray-100">
+          <div className="w-full max-w-lg rounded-2xl border border-[#202225] bg-[#2b2d31] p-8 text-center shadow-2xl">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#949ba4]">Well, this is awkward</p>
+            <h1 className="mt-3 text-2xl font-bold text-white">Looks like Ermine crashed.</h1>
+            <p className="mt-2 text-sm text-gray-300">Try reloading the app. If it keeps happening, relog and reconnect to stoat.chat.</p>
+            <button
+              className="mt-6 rounded-md bg-[#5865f2] px-4 py-2 text-sm font-semibold text-white hover:bg-[#4956d8]"
+              onClick={() => window.location.reload()}
+              type="button"
+            >
+              Reload Ermine
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+const Message = ({ message, users, channels, me, onUserClick, cdnUrl, onToggleReaction, onReply, replyTarget }) => {
   const authorId = typeof message.author === 'string' ? message.author : message.author?._id;
   const author = users[authorId] || (typeof message.author === 'object' ? message.author : null) || { username: 'Unknown user' };
   const mine = me === authorId;
+  const messageReactions = toReactionEntries(message.reactions);
+  const replyPreview = message.replyMessage;
 
   return (
     <article className="group flex gap-3 rounded px-4 py-2 hover:bg-[#2e3035]">
-      <button className="mt-0.5" onClick={() => onUserClick(author, authorId)}>
+      <button className="mt-0.5" onClick={() => onUserClick(author, authorId)} type="button">
         <Avatar cdnUrl={cdnUrl} user={author} />
       </button>
       <div className="min-w-0 flex-1">
+        {replyPreview ? (
+          <button
+            className="mb-1 flex max-w-full items-center gap-1 text-xs text-gray-400 hover:text-gray-200"
+            onClick={() => onUserClick(replyPreview.authorUser || { username: 'Unknown user' }, replyPreview.authorId)}
+            type="button"
+          >
+            <Reply size={12} />
+            <span className="truncate">Replying to {replyPreview.authorUser?.username || 'Unknown user'}: {replyPreview.content || 'Attachment / embed'}</span>
+          </button>
+        ) : null}
         <div className="flex items-baseline gap-2">
-          <button className="text-sm font-semibold text-white hover:underline" onClick={() => onUserClick(author, authorId)}>
+          <button className="text-sm font-semibold text-white hover:underline" onClick={() => onUserClick(author, authorId)} type="button">
             {author.username}
           </button>
           {mine && <span className="rounded bg-[#5865f2]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[#bdc3ff]">YOU</span>}
@@ -167,12 +231,34 @@ const Message = ({ message, users, channels, me, onUserClick, cdnUrl }) => {
         {message.content ? (
           <p className="whitespace-pre-wrap break-words text-sm text-gray-200">{renderMessageContent(message.content, users, channels, onUserClick)}</p>
         ) : null}
+        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+          {messageReactions.map(({ emoji, userIds }) => {
+            const reacted = userIds.includes(me);
+            return (
+              <button
+                className={`rounded-full border px-2 py-0.5 text-xs ${reacted ? 'border-[#5865f2] bg-[#5865f2]/20 text-[#d7ddff]' : 'border-[#4c4f56] bg-[#2b2d31] text-gray-200 hover:bg-[#35373c]'}`}
+                key={emoji}
+                onClick={() => onToggleReaction(message, emoji, reacted)}
+                type="button"
+              >
+                {emoji} {userIds.length}
+              </button>
+            );
+          })}
+          <button className="rounded-full border border-[#4c4f56] px-2 py-0.5 text-xs text-gray-300 hover:bg-[#35373c]" onClick={() => onReply(message)} type="button">
+            <Reply size={12} className="inline" /> Reply
+          </button>
+          <button className="rounded-full border border-[#4c4f56] px-2 py-0.5 text-xs text-gray-300 hover:bg-[#35373c]" onClick={() => onToggleReaction(message, '👍', message.reactions?.['👍']?.includes(me))} type="button">
+            + React
+          </button>
+          {replyTarget === message._id ? <span className="text-[11px] text-[#bdc3ff]">Reply target</span> : null}
+        </div>
       </div>
     </article>
   );
 };
 
-export default function App() {
+function AppShell() {
   const [view, setView] = useState('loading');
   const [status, setStatus] = useState('disconnected');
   const [config, setConfig] = useState({ apiUrl: DEFAULT_API_URL, wsUrl: DEFAULT_WS_URL, cdnUrl: DEFAULT_CDN_URL });
@@ -192,6 +278,9 @@ export default function App() {
   const [activeModal, setActiveModal] = useState(null);
   const [createServerName, setCreateServerName] = useState('');
   const [peekUser, setPeekUser] = useState(null);
+  const [isMembersLoading, setIsMembersLoading] = useState(false);
+  const [replyingTo, setReplyingTo] = useState(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
   const [loginMode, setLoginMode] = useState('credentials');
   const [email, setEmail] = useState('');
@@ -200,12 +289,18 @@ export default function App() {
   const [manualToken, setManualToken] = useState('');
   const [loginError, setLoginError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [wsReconnectAttempt, setWsReconnectAttempt] = useState(0);
 
   const wsRef = useRef(null);
   const messagesBottomRef = useRef(null);
   const subscriptionRef = useRef({});
   const preloadedChannelRef = useRef({});
   const preloadedMembersRef = useRef({});
+  const pendingUserFetchRef = useRef(new Set());
+  const membersLoadIdRef = useRef(0);
+  const canFetchMissingUsersRef = useRef(true);
+  const loggedMissingUserFetchErrorRef = useRef(false);
+  const wsReconnectTimeoutRef = useRef(null);
 
   const serverList = useMemo(() => Object.values(servers), [servers]);
 
@@ -215,15 +310,22 @@ export default function App() {
   }, [channels, selectedServerId]);
 
   const currentMessages = useMemo(() => messages[selectedChannelId] || [], [messages, selectedChannelId]);
+  const currentMessageMap = useMemo(() => Object.fromEntries(currentMessages.map((message) => [message._id, message])), [currentMessages]);
 
-  const currentMembers = useMemo(() => {
+  const allCurrentMembers = useMemo(() => {
     if (selectedServerId === '@me') return [];
     return Object.values(members)
-      .filter((m) => m._id.server === selectedServerId)
-      .map((m) => ({ ...m, user: users[m._id.user] }))
-      .filter((m) => Boolean(m.user))
-      .sort((a, b) => a.user.username.localeCompare(b.user.username));
+      .filter((member) => member._id.server === selectedServerId)
+      .map((member) => ({ ...member, user: users[member._id.user] }))
+      .filter((member) => Boolean(member.user));
   }, [members, selectedServerId, users]);
+
+  const currentMembers = useMemo(
+    () => allCurrentMembers.slice(0, MEMBER_RENDER_LIMIT).sort((a, b) => (a.nickname || a.user.username).localeCompare(b.nickname || b.user.username)),
+    [allCurrentMembers],
+  );
+
+  const hiddenMembersCount = Math.max(0, allCurrentMembers.length - currentMembers.length);
 
   const openUserProfile = (user, fallbackId = null) => {
     const stableId = user?._id || fallbackId || 'unknown-user';
@@ -239,6 +341,84 @@ export default function App() {
     () => Object.values(users).filter((u) => u.relationship === 'Friend' || u.relationship === 1),
     [users],
   );
+
+  const isSameOriginApi = useMemo(() => {
+    try {
+      return new URL(config.apiUrl).origin === window.location.origin;
+    } catch {
+      return false;
+    }
+  }, [config.apiUrl]);
+
+  const upsertUsers = (list = []) => {
+    if (!list.length) return;
+    setUsers((prev) => {
+      const next = { ...prev };
+      list.forEach((user) => {
+        if (user?._id) next[user._id] = user;
+      });
+      return next;
+    });
+  };
+
+  const upsertUsersFromMessages = (messageList = []) => {
+    const embeddedUsers = [];
+
+    messageList.forEach((entry) => {
+      const author = entry?.author;
+      if (author && typeof author === 'object' && author._id) embeddedUsers.push(author);
+      if (entry?.user?._id) embeddedUsers.push(entry.user);
+    });
+
+    upsertUsers(embeddedUsers);
+  };
+
+  const fetchMissingUsers = async (messageList = []) => {
+    if (!canFetchMissingUsersRef.current || !isSameOriginApi) return;
+
+    const unresolved = new Set();
+
+    messageList.forEach((entry) => {
+      const authorId = typeof entry?.author === 'string' ? entry.author : entry?.author?._id;
+      if (!authorId || authorId === '00000000000000000000000000' || users[authorId] || pendingUserFetchRef.current.has(authorId)) return;
+      unresolved.add(authorId);
+    });
+
+    if (!unresolved.size) return;
+
+    const MAX_BACKGROUND_USER_FETCHES = 6;
+    const limitedIds = [...unresolved].slice(0, MAX_BACKGROUND_USER_FETCHES);
+    limitedIds.forEach((id) => pendingUserFetchRef.current.add(id));
+
+    await Promise.all(
+      limitedIds.map(async (userId) => {
+        try {
+          const res = await fetch(`${config.apiUrl}/users/${userId}`, {
+            headers: { 'x-session-token': auth.token },
+          });
+          if (!res.ok) {
+            if (res.status === 401 || res.status === 403 || res.status === 405) {
+              canFetchMissingUsersRef.current = false;
+            }
+            return;
+          }
+          const data = await res.json();
+          if (data?._id) upsertUsers([data]);
+        } catch (error) {
+          const message = (error && error.message) || '';
+          if (message.includes('Failed to fetch') || message.includes('CORS')) {
+            canFetchMissingUsersRef.current = false;
+          }
+          if (!loggedMissingUserFetchErrorRef.current) {
+            loggedMissingUserFetchErrorRef.current = true;
+            console.warn('Disabling background user lookup due to network/CORS restrictions.');
+          }
+        } finally {
+          pendingUserFetchRef.current.delete(userId);
+        }
+      }),
+    );
+  };
 
   const discoverConfig = async (apiUrl) => {
     try {
@@ -321,22 +501,19 @@ export default function App() {
         logout();
         break;
       case 'Message':
-        if (packet.user?._id) {
-          setUsers((prev) => ({ ...prev, [packet.user._id]: packet.user }));
-        }
-        if (typeof packet.author === 'object' && packet.author?._id) {
-          setUsers((prev) => ({ ...prev, [packet.author._id]: packet.author }));
-        }
+        upsertUsersFromMessages([packet]);
+        void fetchMissingUsers([packet]);
         setMessages((prev) => {
           const list = prev[packet.channel] || [];
           if (list.find((m) => m._id === packet._id)) return prev;
-          return { ...prev, [packet.channel]: [...list, packet].slice(-200) };
+          const nextMessages = [...list, packet].slice(-200);
+          return { ...prev, [packet.channel]: enrichReplies(nextMessages) };
         });
         break;
       case 'MessageUpdate':
         setMessages((prev) => ({
           ...prev,
-          [packet.channel]: (prev[packet.channel] || []).map((m) => (m._id === packet.id ? { ...m, ...packet.data } : m)),
+          [packet.channel]: enrichReplies((prev[packet.channel] || []).map((m) => (m._id === packet.id ? { ...m, ...packet.data } : m))),
         }));
         break;
       case 'MessageDelete':
@@ -413,20 +590,31 @@ export default function App() {
       const parsed = new URL(wsUrl.startsWith('ws') ? wsUrl : `wss://${wsUrl}`);
       parsed.searchParams.set('version', '1');
       parsed.searchParams.set('format', 'json');
+      parsed.searchParams.set('token', auth.token);
       wsUrl = parsed.toString();
     } catch {
-      wsUrl = `${DEFAULT_WS_URL}?version=1&format=json`;
+      wsUrl = `${DEFAULT_WS_URL}?version=1&format=json&token=${encodeURIComponent(auth.token)}`;
     }
 
     setStatus('connecting');
     if (wsRef.current) wsRef.current.close();
+    if (wsReconnectTimeoutRef.current) {
+      clearTimeout(wsReconnectTimeoutRef.current);
+      wsReconnectTimeoutRef.current = null;
+    }
 
+    let isUnmounting = false;
     const socket = new WebSocket(wsUrl);
     wsRef.current = socket;
 
-    socket.onopen = () => socket.send(JSON.stringify({ type: 'Authenticate', token: auth.token }));
     socket.onerror = () => setStatus('error');
-    socket.onclose = () => setStatus((prev) => (prev === 'error' ? prev : 'disconnected'));
+    socket.onclose = () => {
+      setStatus((prev) => (prev === 'error' ? prev : 'disconnected'));
+      if (isUnmounting || view !== 'app') return;
+      wsReconnectTimeoutRef.current = setTimeout(() => {
+        setWsReconnectAttempt((value) => value + 1);
+      }, 2500);
+    };
 
     socket.onmessage = (event) => applyEvent(JSON.parse(event.data));
 
@@ -435,10 +623,15 @@ export default function App() {
     }, 20000);
 
     return () => {
+      isUnmounting = true;
       clearInterval(heartbeat);
+      if (wsReconnectTimeoutRef.current) {
+        clearTimeout(wsReconnectTimeoutRef.current);
+        wsReconnectTimeoutRef.current = null;
+      }
       socket.close();
     };
-  }, [auth.token, config.wsUrl, view]);
+  }, [auth.token, config.wsUrl, view, wsReconnectAttempt]);
 
   useEffect(() => {
     const socket = wsRef.current;
@@ -475,6 +668,10 @@ export default function App() {
   const fetchMembers = async (serverId) => {
     if (serverId === '@me') return;
 
+    const loadId = Date.now();
+    membersLoadIdRef.current = loadId;
+    setIsMembersLoading(true);
+
     try {
       const res = await fetch(`${config.apiUrl}/servers/${serverId}/members`, {
         headers: { 'x-session-token': auth.token },
@@ -482,23 +679,53 @@ export default function App() {
       if (!res.ok) return;
       const data = await res.json();
 
-      setUsers((prev) => {
-        const next = { ...prev };
-        data.users?.forEach((u) => {
-          next[u._id] = u;
+      upsertUsers(data.users || []);
+      const payloadMembers = data.members || [];
+
+      for (let index = 0; index < payloadMembers.length; index += MEMBER_HYDRATE_CHUNK) {
+        if (membersLoadIdRef.current !== loadId) break;
+        const chunk = payloadMembers.slice(index, index + MEMBER_HYDRATE_CHUNK);
+
+        setMembers((prev) => {
+          const next = { ...prev };
+          chunk.forEach((member) => {
+            next[`${member._id.server}:${member._id.user}`] = member;
+          });
+          return next;
         });
-        return next;
-      });
-      setMembers((prev) => {
-        const next = { ...prev };
-        data.members?.forEach((m) => {
-          next[`${m._id.server}:${m._id.user}`] = m;
-        });
-        return next;
-      });
+
+        if (index + MEMBER_HYDRATE_CHUNK < payloadMembers.length) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+      }
     } catch {
       // no-op
+    } finally {
+      if (membersLoadIdRef.current === loadId) {
+        setIsMembersLoading(false);
+      }
     }
+  };
+
+  const enrichReplies = (nextMessages) => {
+    const messageById = Object.fromEntries(nextMessages.map((entry) => [entry._id, entry]));
+
+    return nextMessages.map((message) => {
+      const replyId = Array.isArray(message.replies) ? message.replies[0] : null;
+      const replyMessage = replyId ? messageById[replyId] : null;
+      if (!replyMessage) return message;
+      const replyAuthorId = typeof replyMessage.author === 'string' ? replyMessage.author : replyMessage.author?._id;
+
+      return {
+        ...message,
+        replyMessage: {
+          _id: replyMessage._id,
+          content: replyMessage.content,
+          authorId: replyAuthorId,
+          authorUser: users[replyAuthorId] || (typeof replyMessage.author === 'object' ? replyMessage.author : null),
+        },
+      };
+    });
   };
 
   const fetchMessages = async (channelId) => {
@@ -515,16 +742,13 @@ export default function App() {
       const payloadUsers = Array.isArray(data) ? [] : data.users || [];
 
       if (payloadUsers.length) {
-        setUsers((prev) => {
-          const next = { ...prev };
-          payloadUsers.forEach((u) => {
-            next[u._id] = u;
-          });
-          return next;
-        });
+        upsertUsers(payloadUsers);
       }
 
-      setMessages((prev) => ({ ...prev, [channelId]: payloadMessages.reverse().slice(-200) }));
+      upsertUsersFromMessages(payloadMessages);
+      const orderedMessages = payloadMessages.reverse().slice(-200);
+      setMessages((prev) => ({ ...prev, [channelId]: enrichReplies(orderedMessages) }));
+      void fetchMissingUsers(orderedMessages);
       preloadedChannelRef.current[channelId] = true;
     } catch {
       // no-op
@@ -534,40 +758,45 @@ export default function App() {
   useEffect(() => {
     if (status !== 'ready' || !auth.token) return;
 
+    if (document.visibilityState !== 'visible') return;
+
+    const maxWarmChannels = Math.min(8, Math.max(3, Math.floor((navigator.hardwareConcurrency || 4) / 2)));
     const channelsToWarm = Object.values(channels)
       .filter((channel) => channel?.channel_type === 'TextChannel' || !channel?.channel_type)
-      .slice(0, 25);
+      .slice(0, maxWarmChannels);
 
     channelsToWarm.forEach((channel, index) => {
       if (!channel?._id || preloadedChannelRef.current[channel._id]) return;
       setTimeout(() => {
         fetchMessages(channel._id);
-      }, index * 120);
+      }, index * 350);
     });
 
-    Object.values(servers).forEach((server) => {
-      if (!server?._id || preloadedMembersRef.current[server._id]) return;
-      preloadedMembersRef.current[server._id] = true;
-      fetchMembers(server._id);
-    });
-  }, [status, auth.token, channels, servers]);
+  }, [status, auth.token, channels]);
 
   const handleServerSelect = (serverId) => {
     setSelectedServerId(serverId);
 
     if (serverId === '@me') {
       setSelectedChannelId('friends');
+      setReplyingTo(null);
+      setShowEmojiPicker(false);
       return;
     }
 
     const firstChannel = Object.values(channels).find((ch) => ch.server === serverId);
     setSelectedChannelId(firstChannel?._id || null);
     if (firstChannel?._id) fetchMessages(firstChannel._id);
-    fetchMembers(serverId);
+    if (!preloadedMembersRef.current[serverId]) {
+      preloadedMembersRef.current[serverId] = true;
+      void fetchMembers(serverId);
+    }
   };
 
   const handleChannelSelect = (channelId) => {
     setSelectedChannelId(channelId);
+    setReplyingTo(null);
+    setShowEmojiPicker(false);
     fetchMessages(channelId);
   };
 
@@ -632,6 +861,16 @@ export default function App() {
     setMembers({});
     preloadedChannelRef.current = {};
     preloadedMembersRef.current = {};
+    pendingUserFetchRef.current = new Set();
+    membersLoadIdRef.current = 0;
+    canFetchMissingUsersRef.current = true;
+    loggedMissingUserFetchErrorRef.current = false;
+    setIsMembersLoading(false);
+    setWsReconnectAttempt(0);
+    if (wsReconnectTimeoutRef.current) {
+      clearTimeout(wsReconnectTimeoutRef.current);
+      wsReconnectTimeoutRef.current = null;
+    }
     setView('login');
     setStatus('disconnected');
   };
@@ -649,11 +888,55 @@ export default function App() {
           'Content-Type': 'application/json',
           'x-session-token': auth.token,
         },
-        body: JSON.stringify({ content, nonce: crypto.randomUUID() }),
+        body: JSON.stringify({
+          content,
+          nonce: crypto.randomUUID(),
+          replies: replyingTo ? [replyingTo._id] : undefined,
+        }),
       });
+      setReplyingTo(null);
+      setShowEmojiPicker(false);
     } catch {
       setInputText(content);
     }
+  };
+
+
+  const toggleReaction = async (message, emoji, reacted) => {
+    if (!message?._id || !selectedChannelId || selectedChannelId === 'friends') return;
+    const encodedEmoji = encodeURIComponent(emoji);
+
+    setMessages((prev) => {
+      const nextList = (prev[selectedChannelId] || []).map((entry) => {
+        if (entry._id !== message._id) return entry;
+        const existing = entry.reactions?.[emoji] || [];
+        const nextUserIds = reacted ? existing.filter((id) => id !== auth.userId) : [...new Set([...existing, auth.userId])];
+
+        return {
+          ...entry,
+          reactions: {
+            ...(entry.reactions || {}),
+            [emoji]: nextUserIds,
+          },
+        };
+      });
+
+      return { ...prev, [selectedChannelId]: nextList };
+    });
+
+    try {
+      await fetch(`${config.apiUrl}/channels/${selectedChannelId}/messages/${message._id}/reactions/${encodedEmoji}`, {
+        method: reacted ? 'DELETE' : 'PUT',
+        headers: { 'x-session-token': auth.token },
+      });
+    } catch {
+      // no-op, websocket sync should self-heal
+    }
+  };
+
+  const addEmojiToComposer = (emoji) => {
+    setInputText((prev) => `${prev}${emoji}`);
+    setShowEmojiPicker(false);
   };
 
   const createServer = async () => {
@@ -677,6 +960,8 @@ export default function App() {
       // no-op
     }
   };
+
+  const activeReply = replyingTo ? currentMessageMap[replyingTo._id] || replyingTo : null;
 
   const currentChannelName =
     selectedChannelId === 'friends' ? 'friends' : channels[selectedChannelId]?.name || 'select-a-channel';
@@ -871,14 +1156,54 @@ export default function App() {
             </div>
           ) : (
             currentMessages.map((message) => (
-              <Message cdnUrl={config.cdnUrl} channels={channels} key={message._id} me={auth.userId} message={message} onUserClick={openUserProfile} users={users} />
+              <Message
+                cdnUrl={config.cdnUrl}
+                channels={channels}
+                key={message._id}
+                me={auth.userId}
+                message={message}
+                onReply={setReplyingTo}
+                onToggleReaction={toggleReaction}
+                onUserClick={openUserProfile}
+                replyTarget={replyingTo?._id}
+                users={users}
+              />
             ))
           )}
           <div ref={messagesBottomRef} />
         </section>
 
         <footer className="border-t border-[#202225] p-4">
+          {activeReply ? (
+            <div className="mb-2 flex items-center justify-between gap-2 rounded-md bg-[#2b2d31] px-3 py-2 text-xs text-gray-300">
+              <span className="truncate">
+                Replying to {users[typeof activeReply.author === 'string' ? activeReply.author : activeReply.author?._id]?.username || 'Unknown user'}: {activeReply.content || 'Attachment / embed'}
+              </span>
+              <button className="rounded p-1 text-gray-400 hover:bg-[#3a3d42] hover:text-white" onClick={() => setReplyingTo(null)} type="button">
+                <X size={13} />
+              </button>
+            </div>
+          ) : null}
           <div className="flex items-center gap-2 rounded-lg bg-[#383a40] p-2">
+            <div className="relative">
+              <button
+                className="rounded p-2 text-gray-300 hover:bg-[#4b4d55] hover:text-white"
+                disabled={selectedChannelId === 'friends'}
+                onClick={() => setShowEmojiPicker((prev) => !prev)}
+                type="button"
+              >
+                <Smile size={16} />
+              </button>
+              {showEmojiPicker && selectedChannelId !== 'friends' ? (
+                <div className="absolute bottom-12 left-0 z-20 grid w-44 grid-cols-3 gap-1 rounded-lg border border-[#4c4f56] bg-[#232428] p-2 shadow-2xl">
+                  {QUICK_EMOJIS.map((emoji) => (
+                    <button className="rounded p-1.5 text-lg hover:bg-[#3a3d42]" key={emoji} onClick={() => addEmojiToComposer(emoji)} type="button">
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
             <input
               className="flex-1 bg-transparent px-2 py-1 text-sm text-gray-100 placeholder:text-gray-400 focus:outline-none"
               disabled={selectedChannelId === 'friends'}
@@ -887,7 +1212,7 @@ export default function App() {
               placeholder={selectedChannelId === 'friends' ? 'Select a text channel to chat.' : `Message #${currentChannelName}`}
               value={inputText}
             />
-            <button className="rounded p-2 text-gray-300 hover:bg-[#4b4d55] hover:text-white" onClick={sendMessage}>
+            <button className="rounded p-2 text-gray-300 hover:bg-[#4b4d55] hover:text-white" onClick={sendMessage} type="button">
               <Send size={16} />
             </button>
           </div>
@@ -895,8 +1220,11 @@ export default function App() {
       </main>
 
       <aside className="hidden w-60 flex-col border-l border-[#202225] bg-[#2b2d31] lg:flex">
-        <div className="border-b border-[#202225] px-4 py-3 text-xs font-bold uppercase tracking-wide text-gray-400">Members — {currentMembers.length}</div>
+        <div className="border-b border-[#202225] px-4 py-3 text-xs font-bold uppercase tracking-wide text-gray-400">
+          Members — {allCurrentMembers.length}{isMembersLoading ? ' (loading...)' : ''}
+        </div>
         <div className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
+          {hiddenMembersCount > 0 ? <p className="px-2 py-1 text-[11px] text-gray-500">Showing first {currentMembers.length} members for responsiveness.</p> : null}
           {currentMembers.map((member) => (
             <button className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-[#35373c]" key={member._id.user} onClick={() => openUserProfile(member.user, member._id.user)}>
               <Avatar cdnUrl={config.cdnUrl} size="sm" user={member.user} />
@@ -913,3 +1241,12 @@ export default function App() {
     </div>
   );
 }
+
+export default function App() {
+  return (
+    <AppErrorBoundary>
+      <AppShell />
+    </AppErrorBoundary>
+  );
+}
+
