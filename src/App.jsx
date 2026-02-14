@@ -6,6 +6,7 @@ import {
   LogOut,
   MessageSquare,
   Plus,
+  Paperclip,
   Reply,
   Send,
   Settings,
@@ -23,7 +24,7 @@ const getRuntimeConfig = () => {
   return {
     apiUrl: runtime.apiUrl || env.VITE_STOAT_API_URL || 'https://api.stoat.chat',
     wsUrl: runtime.wsUrl || env.VITE_STOAT_WS_URL || 'wss://stoat.chat/events',
-    cdnUrl: runtime.cdnUrl || env.VITE_STOAT_CDN_URL || 'https://autumn.revolt.chat',
+    cdnUrl: runtime.cdnUrl || env.VITE_STOAT_CDN_URL || 'https://cdn.stoatusercontent.com',
   };
 };
 
@@ -40,12 +41,92 @@ const toTime = (value) => {
 
 const getAvatarUrl = (user, cdnUrl) => {
   if (!user?.avatar?._id) return null;
-  return `${cdnUrl}/avatars/${user.avatar._id}?max_side=256`;
+  return `${cdnUrl}/avatars/${user.avatar._id}`;
 };
 
 const getIconUrl = (server, cdnUrl) => {
   if (!server?.icon?._id) return null;
   return `${cdnUrl}/icons/${server.icon._id}`;
+};
+
+
+const getBannerUrl = (user, cdnUrl) => {
+  const banner = user?.profile?.background || user?.banner;
+  if (!banner?._id) return null;
+  return `${cdnUrl}/backgrounds/${banner._id}`;
+};
+
+const getJoinedAt = (entry) => entry?.joined_at || entry?.joinedAt || entry?.created_at || entry?.createdAt || null;
+
+const toDateLabel = (value) => {
+  if (!value) return 'Unknown';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Unknown';
+  return date.toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' });
+};
+
+
+const LinkAnchor = ({ href, children, onRequestOpenLink, className = 'text-[#8ea1ff] underline hover:text-[#bdc3ff]' }) => (
+  <a
+    className={className}
+    href={href}
+    onClick={(event) => {
+      event.preventDefault();
+      if (onRequestOpenLink) onRequestOpenLink(href);
+    }}
+    rel="noreferrer"
+    target="_blank"
+  >
+    {children}
+  </a>
+);
+
+const renderLinksInText = (value, keyPrefix = 'link', onRequestOpenLink = null) => {
+  if (!value) return null;
+  const parts = value.split(/(https?:\/\/[^\s]+)/gi);
+  return parts.map((part, index) => {
+    if (!part) return null;
+    if (/^https?:\/\//i.test(part)) {
+      return <LinkAnchor href={part} key={`${keyPrefix}-${index}`} onRequestOpenLink={onRequestOpenLink}>{part}</LinkAnchor>;
+    }
+    return <React.Fragment key={`${keyPrefix}-${index}`}>{part}</React.Fragment>;
+  });
+};
+
+const renderMarkdownInline = (text, keyPrefix = 'md', onRequestOpenLink = null) => {
+  if (!text) return null;
+  const tokens = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|__[^_]+__|~~[^~]+~~|\[[^\]]+\]\([^\)]+\))/g);
+
+  return tokens.map((token, index) => {
+    if (!token) return null;
+
+    if (/^`[^`]+`$/.test(token)) {
+      return <code className="rounded bg-[#232428] px-1 py-0.5 text-xs text-[#f2f3f5]" key={`${keyPrefix}-${index}`}>{token.slice(1, -1)}</code>;
+    }
+
+    if (/^\*\*[^*]+\*\*$/.test(token)) {
+      return <strong key={`${keyPrefix}-${index}`}>{token.slice(2, -2)}</strong>;
+    }
+
+    if (/^\*[^*]+\*$/.test(token)) {
+      return <em key={`${keyPrefix}-${index}`}>{token.slice(1, -1)}</em>;
+    }
+
+    if (/^__[^_]+__$/.test(token)) {
+      return <span className="underline" key={`${keyPrefix}-${index}`}>{token.slice(2, -2)}</span>;
+    }
+
+    if (/^~~[^~]+~~$/.test(token)) {
+      return <span className="line-through" key={`${keyPrefix}-${index}`}>{token.slice(2, -2)}</span>;
+    }
+
+    const markdownLink = token.match(/^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/i);
+    if (markdownLink) {
+      return <LinkAnchor href={markdownLink[2]} key={`${keyPrefix}-${index}`} onRequestOpenLink={onRequestOpenLink}>{markdownLink[1]}</LinkAnchor>;
+    }
+
+    return <React.Fragment key={`${keyPrefix}-${index}`}>{renderLinksInText(token, `${keyPrefix}-plain-${index}`, onRequestOpenLink)}</React.Fragment>;
+  });
 };
 
 const EMOJI_SHORTCODES = {
@@ -65,6 +146,10 @@ const EMOJI_SHORTCODES = {
 };
 
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '🔥', '😭', '🎉', '😮', '👀', '🤔'];
+const EXTENDED_EMOJIS = [
+  ...QUICK_EMOJIS,
+  '😄', '😁', '🤣', '😉', '🙏', '👏', '✨', '🎯', '💯', '🤝', '😅', '😎', '🥳', '✅', '❌', '🎵', '📌', '🚀', '🫡', '🤌',
+];
 const MEMBER_RENDER_LIMIT = 250;
 const MEMBER_HYDRATE_CHUNK = 400;
 
@@ -75,10 +160,62 @@ const toReactionEntries = (reactions) => {
     .filter((entry) => entry.userIds.length > 0);
 };
 
-const renderMessageContent = (content, users, channels, onUserClick) => {
+
+const getReplyIdFromMessage = (message) => {
+  const firstReply = Array.isArray(message?.replies) ? message.replies[0] : null;
+  if (!firstReply) return null;
+  return typeof firstReply === 'string' ? firstReply : firstReply.id || firstReply._id || null;
+};
+
+
+const isCustomEmojiToken = (value) => /^:[A-Z0-9]{26}:$/i.test(value || '');
+
+const getCustomEmojiId = (token) => token?.slice(1, -1);
+
+const resolveCustomEmojiMeta = (token, customEmojiById) => {
+  if (!isCustomEmojiToken(token)) return null;
+  const emojiId = getCustomEmojiId(token);
+  const mapped = customEmojiById?.[emojiId];
+  return mapped || { id: emojiId, name: emojiId, serverName: null, isPrivate: false, unresolved: true };
+};
+
+const renderEmojiVisual = (token, customEmoji, cdnUrl) => {
+  const emojiId = customEmoji?.id || (isCustomEmojiToken(token) ? getCustomEmojiId(token) : null);
+  if (emojiId) {
+    return <img alt={customEmoji?.name || token} className="inline h-5 w-5 align-text-bottom" src={`${cdnUrl}/emojis/${emojiId}`} />;
+  }
+  return token;
+};
+
+
+const isImageLike = (filename = '', contentType = '') => {
+  if (typeof contentType === 'string' && contentType.startsWith('image/')) return true;
+  return /\.(png|jpe?g|webp|gif|bmp|avif|svg)$/i.test(filename || '');
+};
+
+const getAttachmentData = (attachment, cdnUrl, index = 0) => {
+  const attachmentId = typeof attachment === 'string' ? attachment : attachment?._id || attachment?.id;
+  const filename = attachment?.filename || attachment?.name || `attachment-${index + 1}`;
+  const contentType = attachment?.content_type || attachment?.contentType || attachment?.metadata?.type || '';
+  const url = attachmentId ? `${cdnUrl}/attachments/${attachmentId}` : null;
+  const image = isImageLike(filename, contentType);
+
+  return { attachmentId, filename, url, image };
+};
+
+
+const extractUrls = (value = '') => (value.match(/https?:\/\/[^\s]+/gi) || []);
+
+const isEmbeddableGifLink = (url) => {
+  if (!url) return false;
+  if (/^https?:\/\/media\.tenor\.com\//i.test(url)) return true;
+  return /\.(gif)(\?.*)?$/i.test(url);
+};
+
+const renderMessageContent = (content, users, channels, onUserClick, customEmojiById, cdnUrl, onRequestOpenLink) => {
   if (!content) return null;
 
-  const parts = content.split(/(<@!?[A-Za-z0-9]+>|<#[A-Za-z0-9]+>|:[a-z0-9_+-]+:)/gi);
+  const parts = content.split(/(<@!?[A-Za-z0-9]+>|<#[A-Za-z0-9]+>|:[A-Za-z0-9_+-]+:)/g);
 
   return parts.map((part, index) => {
     if (!part) return null;
@@ -111,14 +248,23 @@ const renderMessageContent = (content, users, channels, onUserClick) => {
 
     const emoji = part.match(/^:([a-z0-9_+-]+):$/i);
     if (emoji) {
+      if (isCustomEmojiToken(part)) {
+        const customEmoji = resolveCustomEmojiMeta(part, customEmojiById);
+        const source = customEmoji?.unresolved ? 'Custom emoji (external/unavailable metadata)' : customEmoji?.isPrivate ? 'Private server emoji' : customEmoji?.serverName ? `Server emoji from ${customEmoji.serverName}` : 'Custom emoji';
+        return (
+          <span className="mx-0.5 inline-flex items-center" key={`${part}-${index}`} title={`${customEmoji?.name || part} · ${source}`}>
+            {renderEmojiVisual(part, customEmoji, cdnUrl)}
+          </span>
+        );
+      }
       return EMOJI_SHORTCODES[emoji[1].toLowerCase()] || part;
     }
 
-    return <React.Fragment key={`${part}-${index}`}>{part}</React.Fragment>;
+    return <React.Fragment key={`${part}-${index}`}>{renderMarkdownInline(part, `md-${index}`, onRequestOpenLink)}</React.Fragment>;
   });
 };
 
-const Avatar = ({ user, cdnUrl, size = 'md' }) => {
+const Avatar = ({ user, cdnUrl, size = 'md', animateOnHover = false, alwaysAnimate = false }) => {
   const sizeMap = {
     sm: 'h-8 w-8 text-xs',
     md: 'h-10 w-10 text-sm',
@@ -126,10 +272,19 @@ const Avatar = ({ user, cdnUrl, size = 'md' }) => {
   };
 
   const initials = (user?.username || '?').slice(0, 2).toUpperCase();
-  const src = getAvatarUrl(user, cdnUrl);
+  const [isHovered, setIsHovered] = useState(false);
+  const src = (() => {
+    if (!user?.avatar?._id) return null;
+    const wantsAnimated = alwaysAnimate || (animateOnHover && isHovered);
+    return wantsAnimated ? `${cdnUrl}/avatars/${user.avatar._id}/original` : `${cdnUrl}/avatars/${user.avatar._id}`;
+  })();
 
   return (
-    <div className={`grid shrink-0 place-items-center overflow-hidden rounded-full bg-[#313338] font-semibold text-gray-200 ${sizeMap[size]}`}>
+    <div
+      className={`grid shrink-0 place-items-center overflow-hidden rounded-full bg-[#313338] font-semibold text-gray-200 ${sizeMap[size]}`}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
       {src ? <img alt={user?.username || 'User avatar'} className="block h-full w-full object-cover object-center" src={src} /> : initials}
     </div>
   );
@@ -198,23 +353,66 @@ class AppErrorBoundary extends React.Component {
   }
 }
 
-const Message = ({ message, users, channels, me, onUserClick, cdnUrl, onToggleReaction, onReply, replyTarget }) => {
+const Message = ({ message, users, channels, me, onUserClick, cdnUrl, onToggleReaction, onReply, replyTarget, onJumpToMessage, registerMessageRef, customEmojiById, reactionOptions, onRequestOpenLink }) => {
   const authorId = typeof message.author === 'string' ? message.author : message.author?._id;
   const author = users[authorId] || (typeof message.author === 'object' ? message.author : null) || { username: 'Unknown user' };
   const mine = me === authorId;
   const messageReactions = toReactionEntries(message.reactions);
   const replyPreview = message.replyMessage;
+  const [showReactionPicker, setShowReactionPicker] = useState(false);
+  const [isMessageHovered, setIsMessageHovered] = useState(false);
+  const embeddedGifUrls = useMemo(() => extractUrls(message.content || '').filter(isEmbeddableGifLink), [message.content]);
+  const [resolvedGifUrls, setResolvedGifUrls] = useState({});
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const resolveTenorUrls = async () => {
+      const tenorLinks = embeddedGifUrls.filter((url) => /^https?:\/\/tenor\.com\//i.test(url));
+      if (!tenorLinks.length) return;
+
+      const results = await Promise.all(
+        tenorLinks.map(async (url) => {
+          try {
+            const response = await fetch(`https://tenor.com/oembed?url=${encodeURIComponent(url)}`);
+            if (!response.ok) return [url, url];
+            const data = await response.json();
+            return [url, data?.url || data?.thumbnail_url || url];
+          } catch {
+            return [url, url];
+          }
+        }),
+      );
+
+      if (!cancelled) {
+        setResolvedGifUrls((prev) => ({ ...prev, ...Object.fromEntries(results) }));
+      }
+    };
+
+    void resolveTenorUrls();
+    return () => {
+      cancelled = true;
+    };
+  }, [embeddedGifUrls]);
+
+  const contentWithoutEmbeddedGifLinks = useMemo(() => {
+    let next = message.content || '';
+    embeddedGifUrls.forEach((url) => {
+      next = next.split(url).join('');
+    });
+    return next.trim();
+  }, [embeddedGifUrls, message.content]);
 
   return (
-    <article className="group flex gap-3 rounded px-4 py-2 hover:bg-[#2e3035]">
+    <article className="group flex gap-3 rounded px-4 py-2 hover:bg-[#2e3035]" onMouseEnter={() => setIsMessageHovered(true)} onMouseLeave={() => setIsMessageHovered(false)} ref={(node) => registerMessageRef(message._id, node)}>
       <button className="mt-0.5" onClick={() => onUserClick(author, authorId)} type="button">
-        <Avatar cdnUrl={cdnUrl} user={author} />
+        <Avatar alwaysAnimate={isMessageHovered} cdnUrl={cdnUrl} user={author} />
       </button>
       <div className="min-w-0 flex-1">
         {replyPreview ? (
           <button
             className="mb-1 flex max-w-full items-center gap-1 text-xs text-gray-400 hover:text-gray-200"
-            onClick={() => onUserClick(replyPreview.authorUser || { username: 'Unknown user' }, replyPreview.authorId)}
+            onClick={() => onJumpToMessage(replyPreview._id)}
             type="button"
           >
             <Reply size={12} />
@@ -228,29 +426,95 @@ const Message = ({ message, users, channels, me, onUserClick, cdnUrl, onToggleRe
           {mine && <span className="rounded bg-[#5865f2]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[#bdc3ff]">YOU</span>}
           <time className="text-[11px] text-gray-500">{toTime(message.createdAt)}</time>
         </div>
-        {message.content ? (
-          <p className="whitespace-pre-wrap break-words text-sm text-gray-200">{renderMessageContent(message.content, users, channels, onUserClick)}</p>
+        {contentWithoutEmbeddedGifLinks ? (
+          <p className="whitespace-pre-wrap break-words text-sm text-gray-200">{renderMessageContent(contentWithoutEmbeddedGifLinks, users, channels, onUserClick, customEmojiById, cdnUrl, onRequestOpenLink)}</p>
+        ) : null}
+        {embeddedGifUrls.length ? (
+          <div className="mt-1.5 flex flex-wrap gap-2">
+            {embeddedGifUrls.slice(0, 3).map((url) => {
+              const renderUrl = resolvedGifUrls[url] || url;
+              return (
+                <button className="block overflow-hidden rounded border border-[#3a3d42]" key={url} onClick={() => onRequestOpenLink(url)} title={url} type="button">
+                  <img alt="Embedded GIF" className="max-h-52 max-w-[320px] object-contain" src={renderUrl} />
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+        {Array.isArray(message.attachments) && message.attachments.length ? (
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {message.attachments.map((attachment, index) => {
+              const { attachmentId, filename, url, image } = getAttachmentData(attachment, cdnUrl, index);
+              if (!attachmentId || !url) return null;
+
+              if (image) {
+                return (
+                  <a className="block overflow-hidden rounded border border-[#3a3d42]" href={url} key={attachmentId} rel="noreferrer" target="_blank" title={filename}>
+                    <img alt={filename} className="max-h-52 max-w-[320px] object-contain" src={url} />
+                  </a>
+                );
+              }
+
+              return (
+                <a
+                  className="rounded bg-[#232428] px-2 py-1 text-xs text-[#bdc3ff] hover:bg-[#2f3136]"
+                  href={url}
+                  key={attachmentId}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  📎 {filename}
+                </a>
+              );
+            })}
+          </div>
         ) : null}
         <div className="mt-1 flex flex-wrap items-center gap-1.5">
           {messageReactions.map(({ emoji, userIds }) => {
             const reacted = userIds.includes(me);
+            const customEmoji = resolveCustomEmojiMeta(emoji, customEmojiById);
+            const source = customEmoji?.unresolved ? 'Custom emoji (external/unavailable metadata)' : customEmoji?.isPrivate ? 'Private server emoji' : customEmoji?.serverName ? `Server emoji from ${customEmoji.serverName}` : 'Emoji';
             return (
               <button
                 className={`rounded-full border px-2 py-0.5 text-xs ${reacted ? 'border-[#5865f2] bg-[#5865f2]/20 text-[#d7ddff]' : 'border-[#4c4f56] bg-[#2b2d31] text-gray-200 hover:bg-[#35373c]'}`}
                 key={emoji}
                 onClick={() => onToggleReaction(message, emoji, reacted)}
+                title={`${customEmoji?.name || emoji} · ${source}`}
                 type="button"
               >
-                {emoji} {userIds.length}
+                {renderEmojiVisual(emoji, customEmoji, cdnUrl)} {userIds.length}
               </button>
             );
           })}
           <button className="rounded-full border border-[#4c4f56] px-2 py-0.5 text-xs text-gray-300 hover:bg-[#35373c]" onClick={() => onReply(message)} type="button">
             <Reply size={12} className="inline" /> Reply
           </button>
-          <button className="rounded-full border border-[#4c4f56] px-2 py-0.5 text-xs text-gray-300 hover:bg-[#35373c]" onClick={() => onToggleReaction(message, '👍', message.reactions?.['👍']?.includes(me))} type="button">
-            + React
-          </button>
+          <div className="relative">
+            <button className="rounded-full border border-[#4c4f56] px-2 py-0.5 text-xs text-gray-300 hover:bg-[#35373c]" onClick={() => setShowReactionPicker((prev) => !prev)} type="button">
+              + React
+            </button>
+            {showReactionPicker ? (
+              <div className="absolute bottom-7 left-0 z-30 w-72 rounded-lg border border-[#4c4f56] bg-[#232428] p-2 shadow-2xl">
+                <p className="mb-1 px-1 text-[10px] uppercase tracking-wide text-gray-500">Add reaction</p>
+                <div className="grid max-h-44 grid-cols-8 gap-1 overflow-y-auto">
+                  {reactionOptions.map((option) => (
+                    <button
+                      className="grid h-8 place-items-center rounded hover:bg-[#3a3d42]"
+                      key={option.value}
+                      onClick={() => {
+                        onToggleReaction(message, option.value, message.reactions?.[option.value]?.includes(me));
+                        setShowReactionPicker(false);
+                      }}
+                      title={option.title}
+                      type="button"
+                    >
+                      {option.custom ? renderEmojiVisual(option.value, option.custom, cdnUrl) : option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
           {replyTarget === message._id ? <span className="text-[11px] text-[#bdc3ff]">Reply target</span> : null}
         </div>
       </div>
@@ -281,6 +545,14 @@ function AppShell() {
   const [isMembersLoading, setIsMembersLoading] = useState(false);
   const [replyingTo, setReplyingTo] = useState(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState([]);
+  const [isUploadingFiles, setIsUploadingFiles] = useState(false);
+  const [voiceNotice, setVoiceNotice] = useState('');
+  const [showGoLatest, setShowGoLatest] = useState(false);
+  const [linkPromptUrl, setLinkPromptUrl] = useState(null);
+  const [statusDraft, setStatusDraft] = useState({ presence: 'Online', text: '' });
+  const [isSavingStatus, setIsSavingStatus] = useState(false);
+  const [isAccountHovered, setIsAccountHovered] = useState(false);
 
   const [loginMode, setLoginMode] = useState('credentials');
   const [email, setEmail] = useState('');
@@ -293,6 +565,7 @@ function AppShell() {
 
   const wsRef = useRef(null);
   const messagesBottomRef = useRef(null);
+  const messagesContainerRef = useRef(null);
   const subscriptionRef = useRef({});
   const preloadedChannelRef = useRef({});
   const preloadedMembersRef = useRef({});
@@ -301,6 +574,10 @@ function AppShell() {
   const canFetchMissingUsersRef = useRef(true);
   const loggedMissingUserFetchErrorRef = useRef(false);
   const wsReconnectTimeoutRef = useRef(null);
+  const messageRefs = useRef({});
+  const replyMessageCacheRef = useRef({});
+  const fileInputRef = useRef(null);
+  const autoFollowRef = useRef(true);
 
   const serverList = useMemo(() => Object.values(servers), [servers]);
 
@@ -308,6 +585,11 @@ function AppShell() {
     if (selectedServerId === '@me') return [];
     return Object.values(channels).filter((ch) => ch.server === selectedServerId);
   }, [channels, selectedServerId]);
+
+  const directMessageChannels = useMemo(
+    () => Object.values(channels).filter((channel) => channel?.channel_type === 'DirectMessage'),
+    [channels],
+  );
 
   const currentMessages = useMemo(() => messages[selectedChannelId] || [], [messages, selectedChannelId]);
   const currentMessageMap = useMemo(() => Object.fromEntries(currentMessages.map((message) => [message._id, message])), [currentMessages]);
@@ -341,6 +623,103 @@ function AppShell() {
     () => Object.values(users).filter((u) => u.relationship === 'Friend' || u.relationship === 1),
     [users],
   );
+
+  const selectedServer = servers[selectedServerId];
+
+  const customEmojis = useMemo(() => {
+    if (!selectedServer || selectedServerId === '@me') return [];
+    const source = selectedServer.emojis || selectedServer.emoji || [];
+    if (Array.isArray(source)) {
+      return source.map((entry) => ({
+        id: entry?._id || entry?.id,
+        name: entry?.name || entry?._id || 'emoji',
+      }));
+    }
+
+    return Object.entries(source).map(([id, value]) => ({
+      id,
+      name: value?.name || id,
+    }));
+  }, [selectedServer, selectedServerId]);
+
+
+  const customEmojiById = useMemo(() => {
+    const index = {};
+    Object.values(servers).forEach((server) => {
+      const source = server?.emojis || server?.emoji || [];
+      const entries = Array.isArray(source)
+        ? source.map((emoji) => ({ id: emoji?._id || emoji?.id, name: emoji?.name }))
+        : Object.entries(source || {}).map(([id, emoji]) => ({ id, name: emoji?.name }));
+
+      entries.forEach((emoji) => {
+        if (!emoji?.id) return;
+        index[emoji.id] = {
+          id: emoji.id,
+          name: emoji.name || emoji.id,
+          serverName: server?.name,
+          isPrivate: server?.discoverable === false,
+        };
+      });
+    });
+    return index;
+  }, [servers]);
+
+  const reactionOptions = useMemo(() => {
+    const base = EXTENDED_EMOJIS.map((emoji) => ({ value: emoji, label: emoji, title: emoji, custom: null }));
+    const serverSet = customEmojis.slice(0, 30).map((emoji) => {
+      const value = `:${emoji.id}:`;
+      const custom = customEmojiById[emoji.id];
+      const source = custom?.isPrivate ? 'Private server emoji' : custom?.serverName ? `Server emoji from ${custom.serverName}` : 'Custom emoji';
+      return { value, label: emoji.name, title: `${emoji.name} · ${source}`, custom };
+    });
+    return [...base, ...serverSet];
+  }, [customEmojis, customEmojiById]);
+
+
+  const peekMember = useMemo(() => {
+    if (!peekUser?._id || selectedServerId === '@me') return null;
+    return members[`${selectedServerId}:${peekUser._id}`] || null;
+  }, [members, peekUser, selectedServerId]);
+
+  const peekRoles = useMemo(() => {
+    if (!peekMember || !selectedServer?.roles) return [];
+    return (peekMember.roles || []).map((roleId) => selectedServer.roles?.[roleId]).filter(Boolean);
+  }, [peekMember, selectedServer]);
+
+  const peekBadges = useMemo(() => {
+    if (!peekUser?.badges) return [];
+    if (Array.isArray(peekUser.badges)) return peekUser.badges;
+    if (typeof peekUser.badges === 'number') {
+      const flagMap = {
+        1: 'Developer',
+        2: 'Translator',
+        4: 'Supporter',
+        8: 'Founder',
+        16: 'Platform Moderation',
+        32: 'Active Supporter',
+        64: 'Paw',
+      };
+      return Object.entries(flagMap)
+        .filter(([bit]) => (peekUser.badges & Number(bit)) === Number(bit))
+        .map(([, label]) => label);
+    }
+    if (typeof peekUser.badges === 'object') {
+      return Object.entries(peekUser.badges)
+        .filter(([, enabled]) => Boolean(enabled))
+        .map(([badge]) => badge);
+    }
+    return [];
+  }, [peekUser]);
+
+
+  const peekAboutMe = useMemo(
+    () => peekUser?.profile?.content || peekUser?.profile?.bio || peekUser?.bio || null,
+    [peekUser],
+  );
+
+  const peekPlatformJoined = useMemo(() => getJoinedAt(peekUser), [peekUser]);
+  const peekServerJoined = useMemo(() => getJoinedAt(peekMember), [peekMember]);
+  const peekBannerUrl = useMemo(() => getBannerUrl(peekUser, config.cdnUrl), [peekUser, config.cdnUrl]);
 
   const isSameOriginApi = useMemo(() => {
     try {
@@ -507,13 +886,13 @@ function AppShell() {
           const list = prev[packet.channel] || [];
           if (list.find((m) => m._id === packet._id)) return prev;
           const nextMessages = [...list, packet].slice(-200);
-          return { ...prev, [packet.channel]: enrichReplies(nextMessages) };
+          return { ...prev, [packet.channel]: enrichReplies(nextMessages, packet.channel) };
         });
         break;
       case 'MessageUpdate':
         setMessages((prev) => ({
           ...prev,
-          [packet.channel]: enrichReplies((prev[packet.channel] || []).map((m) => (m._id === packet.id ? { ...m, ...packet.data } : m))),
+          [packet.channel]: enrichReplies((prev[packet.channel] || []).map((m) => (m._id === packet.id ? { ...m, ...packet.data } : m)), packet.channel),
         }));
         break;
       case 'MessageDelete':
@@ -661,9 +1040,57 @@ function AppShell() {
     };
   }, [selectedServerId, status]);
 
+  const isNearBottom = () => {
+    const container = messagesContainerRef.current;
+    if (!container) return true;
+    const threshold = 72;
+    return container.scrollHeight - container.scrollTop - container.clientHeight <= threshold;
+  };
+
   useEffect(() => {
-    messagesBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    autoFollowRef.current = true;
+
+    const handleScroll = () => {
+      const nearBottom = isNearBottom();
+      autoFollowRef.current = nearBottom;
+      setShowGoLatest(!nearBottom);
+    };
+
+    container.addEventListener('scroll', handleScroll);
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, [selectedChannelId]);
+
+  useEffect(() => {
+    if (autoFollowRef.current || isNearBottom()) {
+      messagesBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+      autoFollowRef.current = true;
+      setShowGoLatest(false);
+      return;
+    }
+
+    setShowGoLatest(true);
   }, [currentMessages]);
+
+  useEffect(() => {
+    if (!selectedChannelId || selectedChannelId === 'friends') return;
+
+    const missingReplyIds = currentMessages
+      .map((message) => getReplyIdFromMessage(message))
+      .filter((replyId) => replyId && !replyMessageCacheRef.current[replyId] && !currentMessageMap[replyId]);
+
+    [...new Set(missingReplyIds)].slice(0, 10).forEach((replyId) => {
+      void fetchReplyMessage(selectedChannelId, replyId);
+    });
+  }, [currentMessages, currentMessageMap, selectedChannelId]);
+
+  useEffect(() => {
+    if (!voiceNotice) return undefined;
+    const timeout = setTimeout(() => setVoiceNotice(''), 3500);
+    return () => clearTimeout(timeout);
+  }, [voiceNotice]);
 
   const fetchMembers = async (serverId) => {
     if (serverId === '@me') return;
@@ -707,13 +1134,35 @@ function AppShell() {
     }
   };
 
-  const enrichReplies = (nextMessages) => {
+  const resolveReplyPreview = (messageById, channelId, replyId) => {
+    const inBatch = messageById[replyId];
+    if (inBatch) return inBatch;
+
+    const inChannelState = (messages[channelId] || []).find((entry) => entry._id === replyId);
+    if (inChannelState) return inChannelState;
+
+    return replyMessageCacheRef.current[replyId] || null;
+  };
+
+  const enrichReplies = (nextMessages = [], channelId = selectedChannelId) => {
     const messageById = Object.fromEntries(nextMessages.map((entry) => [entry._id, entry]));
 
     return nextMessages.map((message) => {
-      const replyId = Array.isArray(message.replies) ? message.replies[0] : null;
-      const replyMessage = replyId ? messageById[replyId] : null;
-      if (!replyMessage) return message;
+      const replyId = getReplyIdFromMessage(message);
+      if (!replyId) return { ...message, replyMessage: null };
+
+      const replyMessage = resolveReplyPreview(messageById, channelId, replyId);
+      if (!replyMessage) {
+        return {
+          ...message,
+          replyMessage: {
+            _id: replyId,
+            content: 'Loading reply…',
+            authorId: null,
+            authorUser: null,
+          },
+        };
+      }
       const replyAuthorId = typeof replyMessage.author === 'string' ? replyMessage.author : replyMessage.author?._id;
 
       return {
@@ -726,6 +1175,28 @@ function AppShell() {
         },
       };
     });
+  };
+
+  const fetchReplyMessage = async (channelId, replyId) => {
+    if (!channelId || !replyId || replyMessageCacheRef.current[replyId]) return;
+
+    try {
+      const res = await fetch(`${config.apiUrl}/channels/${channelId}/messages/${replyId}`, {
+        headers: { 'x-session-token': auth.token },
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data?._id) return;
+
+      replyMessageCacheRef.current[replyId] = data;
+      upsertUsersFromMessages([data]);
+      setMessages((prev) => ({
+        ...prev,
+        [channelId]: enrichReplies(prev[channelId] || [], channelId),
+      }));
+    } catch {
+      // no-op
+    }
   };
 
   const fetchMessages = async (channelId) => {
@@ -747,7 +1218,7 @@ function AppShell() {
 
       upsertUsersFromMessages(payloadMessages);
       const orderedMessages = payloadMessages.reverse().slice(-200);
-      setMessages((prev) => ({ ...prev, [channelId]: enrichReplies(orderedMessages) }));
+      setMessages((prev) => ({ ...prev, [channelId]: enrichReplies(orderedMessages, channelId) }));
       void fetchMissingUsers(orderedMessages);
       preloadedChannelRef.current[channelId] = true;
     } catch {
@@ -784,7 +1255,8 @@ function AppShell() {
       return;
     }
 
-    const firstChannel = Object.values(channels).find((ch) => ch.server === serverId);
+    const firstChannel = Object.values(channels).find((ch) => ch.server === serverId && ch.channel_type !== 'VoiceChannel')
+      || Object.values(channels).find((ch) => ch.server === serverId);
     setSelectedChannelId(firstChannel?._id || null);
     if (firstChannel?._id) fetchMessages(firstChannel._id);
     if (!preloadedMembersRef.current[serverId]) {
@@ -794,10 +1266,129 @@ function AppShell() {
   };
 
   const handleChannelSelect = (channelId) => {
+    const channel = channels[channelId];
+    if (channel?.channel_type === 'VoiceChannel') {
+      setVoiceNotice("Ermine currently doesn't support voice channels.");
+      return;
+    }
+
+    setVoiceNotice('');
     setSelectedChannelId(channelId);
     setReplyingTo(null);
     setShowEmojiPicker(false);
     fetchMessages(channelId);
+  };
+
+  const openDmWithUser = async (userId) => {
+    if (!userId || !auth.token) return;
+
+    const existing = directMessageChannels.find((channel) =>
+      Array.isArray(channel?.recipients) && channel.recipients.includes(userId),
+    );
+
+    if (existing?._id) {
+      setSelectedServerId('@me');
+      handleChannelSelect(existing._id);
+      return;
+    }
+
+    try {
+      const res = await fetch(`${config.apiUrl}/users/${userId}/dm`, {
+        method: 'GET',
+        headers: { 'x-session-token': auth.token },
+      });
+
+      if (!res.ok) return;
+      const channel = await res.json();
+      if (!channel?._id) return;
+
+      setChannels((prev) => ({ ...prev, [channel._id]: channel }));
+      setSelectedServerId('@me');
+      setSelectedChannelId(channel._id);
+      fetchMessages(channel._id);
+    } catch {
+      // no-op
+    }
+  };
+
+  const jumpToMessage = (messageId) => {
+    if (!messageId) return;
+    const target = messageRefs.current[messageId];
+    if (!target) return;
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    target.classList.add('ring-2', 'ring-[#5865f2]', 'bg-[#3a3f66]/40');
+    setTimeout(() => {
+      target.classList.remove('ring-2', 'ring-[#5865f2]', 'bg-[#3a3f66]/40');
+    }, 1200);
+  };
+
+  const registerMessageRef = (messageId, node) => {
+    if (!messageId) return;
+    if (node) {
+      messageRefs.current[messageId] = node;
+    } else {
+      delete messageRefs.current[messageId];
+    }
+  };
+
+
+  const goToLatest = () => {
+    autoFollowRef.current = true;
+    messagesBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    setShowGoLatest(false);
+  };
+
+  const requestOpenLink = (url) => {
+    setLinkPromptUrl(url);
+  };
+
+  const confirmOpenLink = () => {
+    if (!linkPromptUrl) return;
+    window.open(linkPromptUrl, '_blank', 'noopener,noreferrer');
+    setLinkPromptUrl(null);
+  };
+
+  const openStatusEditor = () => {
+    const currentPresence = users[auth.userId]?.status?.presence || 'Online';
+    const currentText = users[auth.userId]?.status?.text || '';
+    setStatusDraft({ presence: currentPresence, text: currentText });
+    setActiveModal('set-status');
+  };
+
+  const saveStatus = async () => {
+    setIsSavingStatus(true);
+
+    setUsers((prev) => ({
+      ...prev,
+      [auth.userId]: {
+        ...(prev[auth.userId] || {}),
+        status: {
+          presence: statusDraft.presence,
+          text: statusDraft.text || undefined,
+        },
+      },
+    }));
+
+    try {
+      await fetch(`${config.apiUrl}/users/@me`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-session-token': auth.token,
+        },
+        body: JSON.stringify({
+          status: {
+            presence: statusDraft.presence,
+            text: statusDraft.text || undefined,
+          },
+        }),
+      });
+    } catch {
+      // no-op
+    } finally {
+      setIsSavingStatus(false);
+      setActiveModal(null);
+    }
   };
 
   const handleLogin = async (event) => {
@@ -877,27 +1468,74 @@ function AppShell() {
 
   const sendMessage = async () => {
     const content = inputText.trim();
-    if (!content || !selectedChannelId || selectedChannelId === 'friends') return;
+    const hasContent = Boolean(content);
+    const hasFiles = pendingFiles.length > 0;
+    if ((!hasContent && !hasFiles) || !selectedChannelId || selectedChannelId === 'friends') return;
 
     setInputText('');
+    setIsUploadingFiles(hasFiles);
+
+    const nonce = crypto.randomUUID();
+    const pendingId = `pending-${nonce}`;
+    const meUser = users[auth.userId] || { _id: auth.userId, username: 'You' };
+
+    const optimisticMessage = {
+      _id: pendingId,
+      channel: selectedChannelId,
+      author: auth.userId,
+      user: meUser,
+      content,
+      createdAt: new Date().toISOString(),
+      reactions: {},
+      replies: replyingTo ? [{ id: replyingTo._id, mention: false }] : undefined,
+      attachments: pendingFiles.map((file, index) => ({ _id: `pending-attachment-${index}-${file.name}`, filename: file.name })),
+    };
+
+    setMessages((prev) => {
+      const list = prev[selectedChannelId] || [];
+      return { ...prev, [selectedChannelId]: enrichReplies([...list, optimisticMessage].slice(-200), selectedChannelId) };
+    });
 
     try {
-      await fetch(`${config.apiUrl}/channels/${selectedChannelId}/messages`, {
+      const attachmentIds = hasFiles ? await uploadFiles(pendingFiles) : [];
+      const payload = {
+        content,
+        nonce,
+        replies: replyingTo ? [{ id: replyingTo._id, mention: false }] : undefined,
+        attachments: attachmentIds.length ? attachmentIds : undefined,
+      };
+
+      const res = await fetch(`${config.apiUrl}/channels/${selectedChannelId}/messages`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'x-session-token': auth.token,
         },
-        body: JSON.stringify({
-          content,
-          nonce: crypto.randomUUID(),
-          replies: replyingTo ? [replyingTo._id] : undefined,
-        }),
+        body: JSON.stringify(payload),
       });
+
+      if (!res.ok) throw new Error('Failed to send message');
+      const postedMessage = await res.json();
+
+      if (postedMessage?._id) {
+        upsertUsersFromMessages([postedMessage]);
+        setMessages((prev) => {
+          const list = (prev[selectedChannelId] || []).map((entry) => (entry._id === pendingId ? postedMessage : entry));
+          return { ...prev, [selectedChannelId]: enrichReplies(list, selectedChannelId) };
+        });
+      }
+
+      setPendingFiles([]);
       setReplyingTo(null);
       setShowEmojiPicker(false);
     } catch {
+      setMessages((prev) => ({
+        ...prev,
+        [selectedChannelId]: (prev[selectedChannelId] || []).filter((entry) => entry._id !== pendingId),
+      }));
       setInputText(content);
+    } finally {
+      setIsUploadingFiles(false);
     }
   };
 
@@ -939,6 +1577,59 @@ function AppShell() {
     setShowEmojiPicker(false);
   };
 
+  const addCustomEmojiToComposer = (emojiId) => {
+    setInputText((prev) => `${prev}:${emojiId}:`);
+    setShowEmojiPicker(false);
+  };
+
+  const handleFilePick = (event) => {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+    setPendingFiles((prev) => [...prev, ...files]);
+    event.target.value = '';
+  };
+
+  const handleComposerDrop = (event) => {
+    event.preventDefault();
+    const files = Array.from(event.dataTransfer?.files || []);
+    if (!files.length) return;
+    setPendingFiles((prev) => [...prev, ...files]);
+  };
+
+  const handleComposerDragOver = (event) => {
+    event.preventDefault();
+  };
+
+  const removePendingFile = (index) => {
+    setPendingFiles((prev) => prev.filter((_, fileIndex) => fileIndex !== index));
+  };
+
+  const uploadFiles = async (files = []) => {
+    const ids = [];
+
+    for (const file of files) {
+      const body = new FormData();
+      body.append('file', file);
+
+      const res = await fetch(`${config.cdnUrl}/attachments`, {
+        method: 'POST',
+        body,
+        headers: {
+          'X-Session-Token': auth.token,
+        },
+      });
+
+      if (!res.ok) {
+        throw new Error('Failed to upload file');
+      }
+
+      const data = await res.json();
+      if (data?.id) ids.push(data.id);
+    }
+
+    return ids;
+  };
+
   const createServer = async () => {
     if (!createServerName.trim()) return;
 
@@ -963,8 +1654,16 @@ function AppShell() {
 
   const activeReply = replyingTo ? currentMessageMap[replyingTo._id] || replyingTo : null;
 
-  const currentChannelName =
-    selectedChannelId === 'friends' ? 'friends' : channels[selectedChannelId]?.name || 'select-a-channel';
+  const currentChannelName = (() => {
+    if (selectedChannelId === 'friends') return 'friends';
+    const channel = channels[selectedChannelId];
+    if (channel?.name) return channel.name;
+    if (channel?.channel_type === 'DirectMessage') {
+      const recipientId = (channel.recipients || []).find((id) => id !== auth.userId);
+      return users[recipientId]?.username || 'direct-message';
+    }
+    return 'select-a-channel';
+  })();
 
   if (view === 'loading') {
     return (
@@ -1060,16 +1759,89 @@ function AppShell() {
         </Modal>
       ) : null}
 
+      {activeModal === 'set-status' ? (
+        <Modal onClose={() => setActiveModal(null)} title="Set your status">
+          <label className="block text-xs font-semibold uppercase tracking-wide text-gray-400">
+            Presence
+            <select className={`${inputBase} mt-1`} onChange={(event) => setStatusDraft((prev) => ({ ...prev, presence: event.target.value }))} value={statusDraft.presence}>
+              <option value="Online">Online</option>
+              <option value="Idle">Idle</option>
+              <option value="Busy">Busy</option>
+              <option value="Invisible">Invisible</option>
+            </select>
+          </label>
+          <label className="block text-xs font-semibold uppercase tracking-wide text-gray-400">
+            Custom status
+            <input className={`${inputBase} mt-1`} maxLength={128} onChange={(event) => setStatusDraft((prev) => ({ ...prev, text: event.target.value }))} placeholder="What's up?" value={statusDraft.text} />
+          </label>
+          <button className="w-full rounded-md bg-[#5865f2] py-2 text-sm font-semibold text-white hover:bg-[#4956d8]" disabled={isSavingStatus} onClick={saveStatus} type="button">
+            {isSavingStatus ? 'Saving…' : 'Save status'}
+          </button>
+        </Modal>
+      ) : null}
+
+      {linkPromptUrl ? (
+        <Modal onClose={() => setLinkPromptUrl(null)} title="Ermine link check">
+          <div className="rounded-md bg-[#1e1f22] p-3 text-sm text-gray-200">
+            <p className="text-xs uppercase tracking-wide text-gray-500">Do you trust this link?</p>
+            <p className="mt-2 break-all text-[#bdc3ff]">{linkPromptUrl}</p>
+            <p className="mt-2 text-xs text-gray-400">Ermine says: only open links from people and servers you trust.</p>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button className="rounded-md bg-[#3a3d42] py-2 text-sm font-semibold text-gray-200 hover:bg-[#4a4d55]" onClick={() => setLinkPromptUrl(null)} type="button">Cancel</button>
+            <button className="rounded-md bg-[#5865f2] py-2 text-sm font-semibold text-white hover:bg-[#4956d8]" onClick={confirmOpenLink} type="button">Open link</button>
+          </div>
+        </Modal>
+      ) : null}
+
       {peekUser ? (
         <Modal onClose={() => setPeekUser(null)} title="Member profile">
-          <div className="flex items-center gap-3 rounded-lg bg-[#1e1f22] p-3">
-            <Avatar cdnUrl={config.cdnUrl} size="lg" user={peekUser} />
-            <div>
-              <div className="text-base font-semibold text-white">{peekUser?.username || 'Unknown user'}</div>
-              <div className="text-xs text-gray-400">#{peekUser?.discriminator || '0000'}</div>
+          <div className="overflow-hidden rounded-lg bg-[#1e1f22]">
+            {peekBannerUrl ? <img alt="Profile banner" className="h-24 w-full object-cover" src={peekBannerUrl} /> : <div className="h-20 w-full bg-gradient-to-r from-[#3b3f6b] to-[#5865f2]" />}
+            <div className="flex items-center gap-3 p-3">
+              <Avatar alwaysAnimate cdnUrl={config.cdnUrl} size="lg" user={peekUser} />
+              <div>
+                <div className="text-base font-semibold text-white">{peekUser?.username || 'Unknown user'}</div>
+                <div className="text-xs text-gray-400">#{peekUser?.discriminator || '0000'}</div>
+              </div>
             </div>
           </div>
-          <p className="text-xs text-gray-400">Ermine profile popout for stoat.chat members.</p>
+
+          <div className="grid grid-cols-1 gap-2 rounded-md bg-[#1e1f22] p-3 text-xs text-gray-300">
+            <p><span className="font-semibold text-gray-100">Joined platform:</span> {toDateLabel(peekPlatformJoined)}</p>
+            <p><span className="font-semibold text-gray-100">Joined server:</span> {selectedServerId === '@me' ? 'N/A' : toDateLabel(peekServerJoined)}</p>
+          </div>
+
+          <div className="space-y-1 rounded-md bg-[#1e1f22] p-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">About me</p>
+            <p className="text-sm text-gray-200">{peekAboutMe || 'This user has not set an About Me yet.'}</p>
+          </div>
+
+          <div className="space-y-1 rounded-md bg-[#1e1f22] p-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Badges</p>
+            {peekBadges.length ? (
+              <div className="flex flex-wrap gap-1.5">
+                {peekBadges.map((badge) => (
+                  <span className="rounded bg-[#5865f2]/20 px-2 py-1 text-xs text-[#d7ddff]" key={badge}>{badge}</span>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-400">No badges</p>
+            )}
+          </div>
+
+          <div className="space-y-1 rounded-md bg-[#1e1f22] p-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Roles</p>
+            {peekRoles.length ? (
+              <div className="flex flex-wrap gap-1.5">
+                {peekRoles.map((role) => (
+                  <span className="rounded bg-[#3a3d42] px-2 py-1 text-xs text-gray-200" key={role.name}>{role.name}</span>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-400">No server roles</p>
+            )}
+          </div>
         </Modal>
       ) : null}
 
@@ -1101,28 +1873,49 @@ function AppShell() {
         </div>
         <div className="flex-1 overflow-y-auto p-2">
           {selectedServerId === '@me' ? (
-            <button className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${selectedChannelId === 'friends' ? 'bg-[#404249] text-white' : 'text-gray-400 hover:bg-[#35373c] hover:text-white'}`} onClick={() => handleChannelSelect('friends')}>
-              <Users size={16} /> Friends
-            </button>
-          ) : (
-            channelList.map((channel) => (
-              <button className={`mb-0.5 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${selectedChannelId === channel._id ? 'bg-[#404249] text-white' : 'text-gray-400 hover:bg-[#35373c] hover:text-white'}`} key={channel._id} onClick={() => handleChannelSelect(channel._id)}>
-                <Hash size={16} />
-                <span className="truncate">{channel.name || 'channel'}</span>
+            <>
+              <button className={`mb-1 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${selectedChannelId === 'friends' ? 'bg-[#404249] text-white' : 'text-gray-400 hover:bg-[#35373c] hover:text-white'}`} onClick={() => handleChannelSelect('friends')}>
+                <Users size={16} /> Friends
               </button>
-            ))
+              {directMessageChannels.map((channel) => {
+                const recipientId = (channel.recipients || []).find((id) => id !== auth.userId);
+                const recipient = users[recipientId];
+                const label = recipient?.username || channel.name || 'Direct Message';
+                return (
+                  <button className={`mb-0.5 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${selectedChannelId === channel._id ? 'bg-[#404249] text-white' : 'text-gray-400 hover:bg-[#35373c] hover:text-white'}`} key={channel._id} onClick={() => handleChannelSelect(channel._id)}>
+                    <MessageSquare size={16} />
+                    <span className="truncate">{label}</span>
+                  </button>
+                );
+              })}
+            </>
+          ) : (
+            channelList.map((channel) => {
+              const isVoice = channel?.channel_type === 'VoiceChannel';
+              return (
+                <button
+                  className={`mb-0.5 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${isVoice ? 'cursor-not-allowed text-gray-500 hover:bg-[#2f3237]' : selectedChannelId === channel._id ? 'bg-[#404249] text-white' : 'text-gray-400 hover:bg-[#35373c] hover:text-white'}`}
+                  key={channel._id}
+                  onClick={() => handleChannelSelect(channel._id)}
+                  title={isVoice ? "Ermine currently doesn't support voice channels." : channel.name}
+                >
+                  {isVoice ? <Users size={16} /> : <Hash size={16} />}
+                  <span className="truncate">{channel.name || 'channel'}</span>
+                </button>
+              );
+            })
           )}
         </div>
 
         <div className="border-t border-[#202225] p-2">
-          <div className="flex items-center justify-between rounded bg-[#232428] p-2">
-            <div className="flex items-center gap-2">
-              <Avatar cdnUrl={config.cdnUrl} size="sm" user={users[auth.userId]} />
+          <div className="flex items-center justify-between rounded bg-[#232428] p-2" onMouseEnter={() => setIsAccountHovered(true)} onMouseLeave={() => setIsAccountHovered(false)}>
+            <button className="flex min-w-0 items-center gap-2 rounded p-1 text-left hover:bg-[#2d3036]" onClick={openStatusEditor} type="button">
+              <Avatar alwaysAnimate={isAccountHovered} cdnUrl={config.cdnUrl} size="sm" user={users[auth.userId]} />
               <div className="min-w-0">
                 <div className="truncate text-xs font-semibold text-white">{users[auth.userId]?.username || 'Connected'}</div>
-                <div className="text-[10px] uppercase tracking-wide text-gray-400">{status}</div>
+                <div className="truncate text-[10px] uppercase tracking-wide text-gray-400">{users[auth.userId]?.status?.text || status}</div>
               </div>
-            </div>
+            </button>
             <button className="rounded p-1 text-gray-400 hover:bg-[#35373c] hover:text-white" onClick={logout} title="Logout">
               <LogOut size={14} />
             </button>
@@ -1130,23 +1923,29 @@ function AppShell() {
         </div>
       </aside>
 
-      <main className="flex min-w-0 flex-1 flex-col bg-[#313338]">
+      <main className="relative flex min-w-0 flex-1 flex-col bg-[#313338]">
         <header className="flex items-center justify-between border-b border-[#202225] px-4 py-3">
           <div className="flex items-center gap-2 text-sm font-semibold text-white">
-            <Hash size={17} className="text-gray-400" />
+            {channels[selectedChannelId]?.channel_type === 'DirectMessage' ? <MessageSquare size={17} className="text-gray-400" /> : <Hash size={17} className="text-gray-400" />}
             <span>{currentChannelName}</span>
           </div>
           <div className="text-xs text-gray-400">Ermine for stoat.chat</div>
         </header>
 
-        <section className="flex-1 overflow-y-auto py-2">
+        {voiceNotice ? (
+          <div className="mx-4 mt-3 rounded-md border border-[#665200] bg-[#5c4a00]/25 px-3 py-2 text-xs text-yellow-200">
+            {voiceNotice}
+          </div>
+        ) : null}
+
+        <section className="flex-1 overflow-y-auto py-2" ref={messagesContainerRef}>
           {selectedChannelId === 'friends' ? (
             <div className="space-y-2 p-4">
               <h2 className="text-xs font-bold uppercase tracking-wide text-gray-400">Friends ({friends.length})</h2>
               {friends.length === 0 ? <p className="text-sm text-gray-400">No friends available yet.</p> : null}
               {friends.map((friend) => (
-                <button className="flex w-full items-center gap-3 rounded bg-[#2b2d31] p-3 text-left hover:bg-[#35373c]" key={friend._id} onClick={() => openUserProfile(friend, friend._id)}>
-                  <Avatar cdnUrl={config.cdnUrl} user={friend} />
+                <button className="flex w-full items-center gap-3 rounded bg-[#2b2d31] p-3 text-left hover:bg-[#35373c]" key={friend._id} onClick={() => openDmWithUser(friend._id)}>
+                  <Avatar animateOnHover cdnUrl={config.cdnUrl} user={friend} />
                   <div className="min-w-0">
                     <div className="truncate text-sm font-semibold text-white">{friend.username}</div>
                     <div className="text-xs text-gray-400">Direct message</div>
@@ -1165,13 +1964,26 @@ function AppShell() {
                 onReply={setReplyingTo}
                 onToggleReaction={toggleReaction}
                 onUserClick={openUserProfile}
+                onJumpToMessage={jumpToMessage}
+                onRequestOpenLink={requestOpenLink}
+                reactionOptions={reactionOptions}
+                registerMessageRef={registerMessageRef}
                 replyTarget={replyingTo?._id}
+                customEmojiById={customEmojiById}
                 users={users}
               />
             ))
           )}
           <div ref={messagesBottomRef} />
         </section>
+
+        {showGoLatest ? (
+          <div className="pointer-events-none absolute bottom-24 left-1/2 z-20 -translate-x-1/2">
+            <button className="pointer-events-auto rounded-full bg-[#5865f2] px-3 py-1.5 text-xs font-semibold text-white shadow-lg hover:bg-[#4956d8]" onClick={goToLatest} type="button">
+              Go to latest
+            </button>
+          </div>
+        ) : null}
 
         <footer className="border-t border-[#202225] p-4">
           {activeReply ? (
@@ -1184,7 +1996,31 @@ function AppShell() {
               </button>
             </div>
           ) : null}
-          <div className="flex items-center gap-2 rounded-lg bg-[#383a40] p-2">
+          {pendingFiles.length ? (
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {pendingFiles.map((file, index) => {
+                const previewImage = isImageLike(file.name, file.type);
+                return (
+                  <button className="flex items-center gap-2 rounded bg-[#2b2d31] px-2 py-1 text-xs text-gray-200 hover:bg-[#35373c]" key={`${file.name}-${index}`} onClick={() => removePendingFile(index)} type="button">
+                    <span>{previewImage ? '🖼️' : '📎'}</span>
+                    <span>{file.name} <span className="text-gray-400">(remove)</span></span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+
+          <div className="flex items-center gap-2 rounded-lg bg-[#383a40] p-2" onDragOver={handleComposerDragOver} onDrop={handleComposerDrop}>
+            <button
+              className="rounded p-2 text-gray-300 hover:bg-[#4b4d55] hover:text-white"
+              disabled={selectedChannelId === 'friends' || isUploadingFiles}
+              onClick={() => fileInputRef.current?.click()}
+              title="Upload files"
+              type="button"
+            >
+              <Paperclip size={16} />
+            </button>
+            <input className="hidden" multiple onChange={handleFilePick} ref={fileInputRef} type="file" />
             <div className="relative">
               <button
                 className="rounded p-2 text-gray-300 hover:bg-[#4b4d55] hover:text-white"
@@ -1195,12 +2031,32 @@ function AppShell() {
                 <Smile size={16} />
               </button>
               {showEmojiPicker && selectedChannelId !== 'friends' ? (
-                <div className="absolute bottom-12 left-0 z-20 grid w-44 grid-cols-3 gap-1 rounded-lg border border-[#4c4f56] bg-[#232428] p-2 shadow-2xl">
-                  {QUICK_EMOJIS.map((emoji) => (
-                    <button className="rounded p-1.5 text-lg hover:bg-[#3a3d42]" key={emoji} onClick={() => addEmojiToComposer(emoji)} type="button">
-                      {emoji}
-                    </button>
-                  ))}
+                <div className="absolute bottom-12 left-0 z-20 w-72 rounded-lg border border-[#4c4f56] bg-[#232428] p-2 shadow-2xl">
+                  <p className="mb-1 text-[10px] uppercase tracking-wide text-gray-500">Emoji</p>
+                  <div className="grid max-h-36 grid-cols-8 gap-1 overflow-y-auto">
+                    {EXTENDED_EMOJIS.map((emoji) => (
+                      <button className="rounded p-1 text-lg hover:bg-[#3a3d42]" key={emoji} onClick={() => addEmojiToComposer(emoji)} type="button">
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                  {customEmojis.length ? (
+                    <>
+                      <p className="mb-1 mt-2 text-[10px] uppercase tracking-wide text-gray-500">Server emojis</p>
+                      <div className="flex max-h-24 flex-wrap gap-1 overflow-y-auto">
+                        {customEmojis.map((emoji) => {
+                          const custom = customEmojiById[emoji.id];
+                          const source = custom?.isPrivate ? 'Private server emoji' : custom?.serverName ? `Server emoji from ${custom.serverName}` : 'Custom emoji';
+                          return (
+                            <button className="flex items-center gap-1 rounded bg-[#303239] px-1.5 py-1 text-xs text-gray-200 hover:bg-[#3a3d42]" key={emoji.id || emoji.name} onClick={() => addCustomEmojiToComposer(emoji.id)} title={`${emoji.name} · ${source}`} type="button">
+                              {renderEmojiVisual(`:${emoji.id}:`, custom, config.cdnUrl)}
+                              <span>:{emoji.name}:</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -1208,11 +2064,16 @@ function AppShell() {
               className="flex-1 bg-transparent px-2 py-1 text-sm text-gray-100 placeholder:text-gray-400 focus:outline-none"
               disabled={selectedChannelId === 'friends'}
               onChange={(e) => setInputText(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-              placeholder={selectedChannelId === 'friends' ? 'Select a text channel to chat.' : `Message #${currentChannelName}`}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  sendMessage();
+                }
+              }}
+              placeholder={selectedChannelId === 'friends' ? 'Select a text channel to chat.' : `Enter message in #${currentChannelName}`}
               value={inputText}
             />
-            <button className="rounded p-2 text-gray-300 hover:bg-[#4b4d55] hover:text-white" onClick={sendMessage} type="button">
+            <button className="rounded p-2 text-gray-300 hover:bg-[#4b4d55] hover:text-white disabled:cursor-not-allowed disabled:opacity-60" disabled={isUploadingFiles} onClick={sendMessage} type="button">
               <Send size={16} />
             </button>
           </div>
@@ -1227,7 +2088,7 @@ function AppShell() {
           {hiddenMembersCount > 0 ? <p className="px-2 py-1 text-[11px] text-gray-500">Showing first {currentMembers.length} members for responsiveness.</p> : null}
           {currentMembers.map((member) => (
             <button className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-[#35373c]" key={member._id.user} onClick={() => openUserProfile(member.user, member._id.user)}>
-              <Avatar cdnUrl={config.cdnUrl} size="sm" user={member.user} />
+              <Avatar animateOnHover cdnUrl={config.cdnUrl} size="sm" user={member.user} />
               <div className="min-w-0">
                 <div className="truncate text-sm text-gray-200">{member.nickname || member.user.username}</div>
                 <div className="flex items-center gap-1 text-[11px] text-gray-500">
@@ -1249,4 +2110,3 @@ export default function App() {
     </AppErrorBoundary>
   );
 }
-
