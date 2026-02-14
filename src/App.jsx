@@ -144,9 +144,17 @@ const isCustomEmojiToken = (value) => /^:[A-Z0-9]{26}:$/i.test(value || '');
 
 const getCustomEmojiId = (token) => token?.slice(1, -1);
 
+const resolveCustomEmojiMeta = (token, customEmojiById) => {
+  if (!isCustomEmojiToken(token)) return null;
+  const emojiId = getCustomEmojiId(token);
+  const mapped = customEmojiById?.[emojiId];
+  return mapped || { id: emojiId, name: emojiId, serverName: null, isPrivate: false, unresolved: true };
+};
+
 const renderEmojiVisual = (token, customEmoji, cdnUrl) => {
-  if (customEmoji?.id) {
-    return <img alt={customEmoji.name || token} className="inline h-5 w-5 align-text-bottom" src={`${cdnUrl}/emojis/${customEmoji.id}`} />;
+  const emojiId = customEmoji?.id || (isCustomEmojiToken(token) ? getCustomEmojiId(token) : null);
+  if (emojiId) {
+    return <img alt={customEmoji?.name || token} className="inline h-5 w-5 align-text-bottom" src={`${cdnUrl}/emojis/${emojiId}`} />;
   }
   return token;
 };
@@ -204,8 +212,8 @@ const renderMessageContent = (content, users, channels, onUserClick, customEmoji
     const emoji = part.match(/^:([a-z0-9_+-]+):$/i);
     if (emoji) {
       if (isCustomEmojiToken(part)) {
-        const customEmoji = customEmojiById[getCustomEmojiId(part)];
-        const source = customEmoji?.isPrivate ? 'Private server emoji' : customEmoji?.serverName ? `Server emoji from ${customEmoji.serverName}` : 'Custom emoji';
+        const customEmoji = resolveCustomEmojiMeta(part, customEmojiById);
+        const source = customEmoji?.unresolved ? 'Custom emoji (external/unavailable metadata)' : customEmoji?.isPrivate ? 'Private server emoji' : customEmoji?.serverName ? `Server emoji from ${customEmoji.serverName}` : 'Custom emoji';
         return (
           <span className="mx-0.5 inline-flex items-center" key={`${part}-${index}`} title={`${customEmoji?.name || part} · ${source}`}>
             {renderEmojiVisual(part, customEmoji, cdnUrl)}
@@ -315,11 +323,12 @@ const Message = ({ message, users, channels, me, onUserClick, cdnUrl, onToggleRe
   const messageReactions = toReactionEntries(message.reactions);
   const replyPreview = message.replyMessage;
   const [showReactionPicker, setShowReactionPicker] = useState(false);
+  const [isMessageHovered, setIsMessageHovered] = useState(false);
 
   return (
-    <article className="group flex gap-3 rounded px-4 py-2 hover:bg-[#2e3035]" ref={(node) => registerMessageRef(message._id, node)}>
+    <article className="group flex gap-3 rounded px-4 py-2 hover:bg-[#2e3035]" onMouseEnter={() => setIsMessageHovered(true)} onMouseLeave={() => setIsMessageHovered(false)} ref={(node) => registerMessageRef(message._id, node)}>
       <button className="mt-0.5" onClick={() => onUserClick(author, authorId)} type="button">
-        <Avatar animateOnHover cdnUrl={cdnUrl} user={author} />
+        <Avatar alwaysAnimate={isMessageHovered} cdnUrl={cdnUrl} user={author} />
       </button>
       <div className="min-w-0 flex-1">
         {replyPreview ? (
@@ -373,8 +382,8 @@ const Message = ({ message, users, channels, me, onUserClick, cdnUrl, onToggleRe
         <div className="mt-1 flex flex-wrap items-center gap-1.5">
           {messageReactions.map(({ emoji, userIds }) => {
             const reacted = userIds.includes(me);
-            const customEmoji = isCustomEmojiToken(emoji) ? customEmojiById[getCustomEmojiId(emoji)] : null;
-            const source = customEmoji?.isPrivate ? 'Private server emoji' : customEmoji?.serverName ? `Server emoji from ${customEmoji.serverName}` : 'Emoji';
+            const customEmoji = resolveCustomEmojiMeta(emoji, customEmojiById);
+            const source = customEmoji?.unresolved ? 'Custom emoji (external/unavailable metadata)' : customEmoji?.isPrivate ? 'Private server emoji' : customEmoji?.serverName ? `Server emoji from ${customEmoji.serverName}` : 'Emoji';
             return (
               <button
                 className={`rounded-full border px-2 py-0.5 text-xs ${reacted ? 'border-[#5865f2] bg-[#5865f2]/20 text-[#d7ddff]' : 'border-[#4c4f56] bg-[#2b2d31] text-gray-200 hover:bg-[#35373c]'}`}
@@ -395,8 +404,9 @@ const Message = ({ message, users, channels, me, onUserClick, cdnUrl, onToggleRe
               + React
             </button>
             {showReactionPicker ? (
-              <div className="absolute bottom-7 left-0 z-30 w-56 rounded-lg border border-[#4c4f56] bg-[#232428] p-2 shadow-2xl">
-                <div className="grid grid-cols-6 gap-1">
+              <div className="absolute bottom-7 left-0 z-30 w-72 rounded-lg border border-[#4c4f56] bg-[#232428] p-2 shadow-2xl">
+                <p className="mb-1 px-1 text-[10px] uppercase tracking-wide text-gray-500">Add reaction</p>
+                <div className="grid max-h-44 grid-cols-8 gap-1 overflow-y-auto">
                   {reactionOptions.map((option) => (
                     <button
                       className="grid h-8 place-items-center rounded hover:bg-[#3a3d42]"
@@ -1790,9 +1800,9 @@ function AppShell() {
                 <Smile size={16} />
               </button>
               {showEmojiPicker && selectedChannelId !== 'friends' ? (
-                <div className="absolute bottom-12 left-0 z-20 w-60 rounded-lg border border-[#4c4f56] bg-[#232428] p-2 shadow-2xl">
+                <div className="absolute bottom-12 left-0 z-20 w-72 rounded-lg border border-[#4c4f56] bg-[#232428] p-2 shadow-2xl">
                   <p className="mb-1 text-[10px] uppercase tracking-wide text-gray-500">Emoji</p>
-                  <div className="grid max-h-36 grid-cols-6 gap-1 overflow-y-auto">
+                  <div className="grid max-h-36 grid-cols-8 gap-1 overflow-y-auto">
                     {EXTENDED_EMOJIS.map((emoji) => (
                       <button className="rounded p-1 text-lg hover:bg-[#3a3d42]" key={emoji} onClick={() => addEmojiToComposer(emoji)} type="button">
                         {emoji}
