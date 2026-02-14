@@ -2,9 +2,13 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   AlertCircle,
+  Circle,
+  EyeOff,
   Hash,
   LogOut,
   MessageSquare,
+  Moon,
+  MinusCircle,
   Plus,
   Paperclip,
   Reply,
@@ -32,6 +36,37 @@ const { apiUrl: DEFAULT_API_URL, wsUrl: DEFAULT_WS_URL, cdnUrl: DEFAULT_CDN_URL 
 
 const inputBase =
   'w-full rounded-md border border-[#202225] bg-[#111214] px-3 py-2 text-sm text-gray-100 placeholder:text-gray-500 focus:border-[#5865f2] focus:outline-none focus:ring-1 focus:ring-[#5865f2]';
+
+const TOKEN_COOKIE_NAME = 'ermine_session_token';
+const USER_COOKIE_NAME = 'ermine_user_id';
+const API_COOKIE_NAME = 'ermine_api_url';
+
+const getCookie = (name) => {
+  if (typeof document === 'undefined') return null;
+  const value = document.cookie
+    .split('; ')
+    .find((entry) => entry.startsWith(`${name}=`));
+  if (!value) return null;
+  return decodeURIComponent(value.slice(name.length + 1));
+};
+
+const setCookie = (name, value, maxAgeSeconds = 60 * 60 * 24 * 30) => {
+  if (typeof document === 'undefined') return;
+  document.cookie = `${name}=${encodeURIComponent(value)}; Max-Age=${maxAgeSeconds}; Path=/; SameSite=Lax; Secure`;
+};
+
+const clearCookie = (name) => {
+  if (typeof document === 'undefined') return;
+  document.cookie = `${name}=; Max-Age=0; Path=/; SameSite=Lax; Secure`;
+};
+
+const STATUS_OPTIONS = [
+  { value: 'Online', label: 'Online', icon: Activity, iconClass: 'text-[#3ba55d]' },
+  { value: 'Idle', label: 'Idle', icon: Moon, iconClass: 'text-[#f0b232]' },
+  { value: 'Busy', label: 'Do Not Disturb', icon: MinusCircle, iconClass: 'text-[#ed4245]' },
+  { value: 'Focus', label: 'Focus', icon: Circle, iconClass: 'text-[#4f7dff]' },
+  { value: 'Invisible', label: 'Invisible', icon: EyeOff, iconClass: 'text-gray-400' },
+];
 
 const toTime = (value) => {
   const date = value ? new Date(value) : new Date();
@@ -553,6 +588,7 @@ function AppShell() {
   const [statusDraft, setStatusDraft] = useState({ presence: 'Online', text: '' });
   const [isSavingStatus, setIsSavingStatus] = useState(false);
   const [isAccountHovered, setIsAccountHovered] = useState(false);
+  const [privacyAcknowledged, setPrivacyAcknowledged] = useState(false);
 
   const [loginMode, setLoginMode] = useState('credentials');
   const [email, setEmail] = useState('');
@@ -561,6 +597,7 @@ function AppShell() {
   const [manualToken, setManualToken] = useState('');
   const [loginError, setLoginError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [privacyConsent, setPrivacyConsent] = useState(false);
   const [wsReconnectAttempt, setWsReconnectAttempt] = useState(0);
 
   const wsRef = useRef(null);
@@ -578,6 +615,7 @@ function AppShell() {
   const replyMessageCacheRef = useRef({});
   const fileInputRef = useRef(null);
   const autoFollowRef = useRef(true);
+  const isProgrammaticScrollRef = useRef(false);
 
   const serverList = useMemo(() => Object.values(servers), [servers]);
 
@@ -816,9 +854,9 @@ function AppShell() {
   };
 
   useEffect(() => {
-    const savedToken = localStorage.getItem('stoat_token');
-    const savedUserId = localStorage.getItem('stoat_user_id');
-    const savedApi = localStorage.getItem('stoat_api_url');
+    const savedToken = getCookie(TOKEN_COOKIE_NAME) || localStorage.getItem('stoat_token');
+    const savedUserId = getCookie(USER_COOKIE_NAME) || localStorage.getItem('stoat_user_id');
+    const savedApi = getCookie(API_COOKIE_NAME) || localStorage.getItem('stoat_api_url');
 
     const api = savedApi || DEFAULT_API_URL;
     setConfig((prev) => ({ ...prev, apiUrl: api }));
@@ -1054,9 +1092,10 @@ function AppShell() {
     autoFollowRef.current = true;
 
     const handleScroll = () => {
+      if (isProgrammaticScrollRef.current) return;
       const nearBottom = isNearBottom();
       autoFollowRef.current = nearBottom;
-      setShowGoLatest(!nearBottom);
+      setShowGoLatest((prev) => (prev === !nearBottom ? prev : !nearBottom));
     };
 
     container.addEventListener('scroll', handleScroll);
@@ -1065,7 +1104,11 @@ function AppShell() {
 
   useEffect(() => {
     if (autoFollowRef.current || isNearBottom()) {
-      messagesBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+      isProgrammaticScrollRef.current = true;
+      messagesBottomRef.current?.scrollIntoView({ behavior: 'auto' });
+      requestAnimationFrame(() => {
+        isProgrammaticScrollRef.current = false;
+      });
       autoFollowRef.current = true;
       setShowGoLatest(false);
       return;
@@ -1333,8 +1376,12 @@ function AppShell() {
 
 
   const goToLatest = () => {
+    isProgrammaticScrollRef.current = true;
     autoFollowRef.current = true;
     messagesBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    requestAnimationFrame(() => {
+      isProgrammaticScrollRef.current = false;
+    });
     setShowGoLatest(false);
   };
 
@@ -1394,6 +1441,10 @@ function AppShell() {
   const handleLogin = async (event) => {
     event.preventDefault();
     setLoginError('');
+    if (!privacyConsent) {
+      setLoginError('Please accept the privacy policy before signing in.');
+      return;
+    }
     setIsLoggingIn(true);
 
     try {
@@ -1428,9 +1479,9 @@ function AppShell() {
 
       if (!token || !userId) throw new Error('Session creation failed.');
 
-      localStorage.setItem('stoat_token', token);
-      localStorage.setItem('stoat_user_id', userId);
-      localStorage.setItem('stoat_api_url', config.apiUrl);
+      setCookie(TOKEN_COOKIE_NAME, token);
+      setCookie(USER_COOKIE_NAME, userId);
+      setCookie(API_COOKIE_NAME, config.apiUrl);
 
       setAuth({ token, userId });
       setView('app');
@@ -1442,8 +1493,12 @@ function AppShell() {
   };
 
   const logout = () => {
+    clearCookie(TOKEN_COOKIE_NAME);
+    clearCookie(USER_COOKIE_NAME);
+    clearCookie(API_COOKIE_NAME);
     localStorage.removeItem('stoat_token');
     localStorage.removeItem('stoat_user_id');
+    localStorage.removeItem('stoat_api_url');
     setAuth({ token: null, userId: null });
     setMessages({});
     setServers({});
@@ -1719,6 +1774,13 @@ function AppShell() {
               />
             )}
 
+            <label className="flex items-start gap-2 rounded-md border border-[#2f3237] bg-[#1e1f22] p-2 text-xs text-gray-300">
+              <input checked={privacyConsent} className="mt-0.5" onChange={(e) => setPrivacyConsent(e.target.checked)} type="checkbox" />
+              <span>
+                I agree to the <a className="text-[#8ea1ff] underline hover:text-[#bdc3ff]" href="/privacy-policy.html" rel="noreferrer" target="_blank">privacy policy</a>. Ermine stores only my session token in a cookie.
+              </span>
+            </label>
+
             {loginError ? (
               <div className="flex items-start gap-2 rounded-md border border-red-800 bg-red-900/30 p-2 text-sm text-red-200">
                 <AlertCircle className="mt-0.5" size={15} />
@@ -1761,15 +1823,32 @@ function AppShell() {
 
       {activeModal === 'set-status' ? (
         <Modal onClose={() => setActiveModal(null)} title="Set your status">
-          <label className="block text-xs font-semibold uppercase tracking-wide text-gray-400">
-            Presence
-            <select className={`${inputBase} mt-1`} onChange={(event) => setStatusDraft((prev) => ({ ...prev, presence: event.target.value }))} value={statusDraft.presence}>
-              <option value="Online">Online</option>
-              <option value="Idle">Idle</option>
-              <option value="Busy">Busy</option>
-              <option value="Invisible">Invisible</option>
-            </select>
-          </label>
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Presence</p>
+            <div className="grid grid-cols-1 gap-2">
+              {STATUS_OPTIONS.map((option) => {
+                const Icon = option.icon;
+                const selected = statusDraft.presence === option.value;
+                const focusVisual = option.value === 'Focus'
+                  ? 'border-2 border-[#4f7dff] bg-[#4f7dff]/10 p-[6px] text-[#4f7dff]'
+                  : '';
+
+                return (
+                  <button
+                    className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-left transition ${selected ? 'border-[#5865f2] bg-[#2c3163]/45' : 'border-[#2f3237] bg-[#1f2024] hover:border-[#3f4451] hover:bg-[#282a31]'}`}
+                    key={option.value}
+                    onClick={() => setStatusDraft((prev) => ({ ...prev, presence: option.value }))}
+                    type="button"
+                  >
+                    <span className={`rounded-full ${focusVisual || 'p-1.5'} ${option.iconClass}`}>
+                      <Icon size={15} />
+                    </span>
+                    <span className="text-sm text-gray-100">{option.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
           <label className="block text-xs font-semibold uppercase tracking-wide text-gray-400">
             Custom status
             <input className={`${inputBase} mt-1`} maxLength={128} onChange={(event) => setStatusDraft((prev) => ({ ...prev, text: event.target.value }))} placeholder="What's up?" value={statusDraft.text} />
@@ -1777,6 +1856,22 @@ function AppShell() {
           <button className="w-full rounded-md bg-[#5865f2] py-2 text-sm font-semibold text-white hover:bg-[#4956d8]" disabled={isSavingStatus} onClick={saveStatus} type="button">
             {isSavingStatus ? 'Saving…' : 'Save status'}
           </button>
+        </Modal>
+      ) : null}
+
+
+      {activeModal === 'user-settings' ? (
+        <Modal onClose={() => setActiveModal(null)} title="User settings">
+          <div className="space-y-3 rounded-md border border-[#2f3237] bg-[#1f2024] p-3 text-sm text-gray-300">
+            <p><span className="font-semibold text-white">Privacy:</span> Ermine stores your session token in a secure browser cookie so you stay logged in.</p>
+            <p>No personal profile data is persisted to Ermine repositories or Ermine servers.</p>
+            <p>Ermine only communicates with official stoat.chat endpoints configured in this client.</p>
+          </div>
+          <label className="flex items-start gap-2 rounded-md bg-[#232428] p-2 text-xs text-gray-300">
+            <input checked={privacyAcknowledged} className="mt-0.5" onChange={(event) => setPrivacyAcknowledged(event.target.checked)} type="checkbox" />
+            <span>I understand Ermine uses cookies for the session token and sends chat traffic only to configured stoat.chat services.</span>
+          </label>
+          <a className="text-xs text-[#8ea1ff] underline hover:text-[#bdc3ff]" href="/privacy-policy.html" rel="noreferrer" target="_blank">Read privacy policy</a>
         </Modal>
       ) : null}
 
@@ -1916,9 +2011,14 @@ function AppShell() {
                 <div className="truncate text-[10px] uppercase tracking-wide text-gray-400">{users[auth.userId]?.status?.text || status}</div>
               </div>
             </button>
-            <button className="rounded p-1 text-gray-400 hover:bg-[#35373c] hover:text-white" onClick={logout} title="Logout">
-              <LogOut size={14} />
-            </button>
+            <div className="flex items-center gap-1">
+              <button className="rounded p-1 text-gray-400 hover:bg-[#35373c] hover:text-white" onClick={() => setActiveModal('user-settings')} title="User settings" type="button">
+                <Settings size={14} />
+              </button>
+              <button className="rounded p-1 text-gray-400 hover:bg-[#35373c] hover:text-white" onClick={logout} title="Logout" type="button">
+                <LogOut size={14} />
+              </button>
+            </div>
           </div>
         </div>
       </aside>
