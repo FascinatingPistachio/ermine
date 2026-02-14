@@ -48,6 +48,58 @@ const getIconUrl = (server, cdnUrl) => {
   return `${cdnUrl}/icons/${server.icon._id}`;
 };
 
+
+const getBannerUrl = (user, cdnUrl) => {
+  const banner = user?.profile?.background || user?.banner;
+  if (!banner?._id) return null;
+  return `${cdnUrl}/backgrounds/${banner._id}?max_side=1024`;
+};
+
+const getJoinedAt = (entry) => entry?.joined_at || entry?.joinedAt || entry?.created_at || entry?.createdAt || null;
+
+const toDateLabel = (value) => {
+  if (!value) return 'Unknown';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Unknown';
+  return date.toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' });
+};
+
+const renderMarkdownInline = (text, keyPrefix = 'md') => {
+  if (!text) return null;
+  const tokens = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|__[^_]+__|~~[^~]+~~|\[[^\]]+\]\([^\)]+\))/g);
+
+  return tokens.map((token, index) => {
+    if (!token) return null;
+
+    if (/^`[^`]+`$/.test(token)) {
+      return <code className="rounded bg-[#232428] px-1 py-0.5 text-xs text-[#f2f3f5]" key={`${keyPrefix}-${index}`}>{token.slice(1, -1)}</code>;
+    }
+
+    if (/^\*\*[^*]+\*\*$/.test(token)) {
+      return <strong key={`${keyPrefix}-${index}`}>{token.slice(2, -2)}</strong>;
+    }
+
+    if (/^\*[^*]+\*$/.test(token)) {
+      return <em key={`${keyPrefix}-${index}`}>{token.slice(1, -1)}</em>;
+    }
+
+    if (/^__[^_]+__$/.test(token)) {
+      return <span className="underline" key={`${keyPrefix}-${index}`}>{token.slice(2, -2)}</span>;
+    }
+
+    if (/^~~[^~]+~~$/.test(token)) {
+      return <span className="line-through" key={`${keyPrefix}-${index}`}>{token.slice(2, -2)}</span>;
+    }
+
+    const markdownLink = token.match(/^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/i);
+    if (markdownLink) {
+      return <a className="text-[#8ea1ff] underline hover:text-[#bdc3ff]" href={markdownLink[2]} key={`${keyPrefix}-${index}`} rel="noreferrer" target="_blank">{markdownLink[1]}</a>;
+    }
+
+    return <React.Fragment key={`${keyPrefix}-${index}`}>{token}</React.Fragment>;
+  });
+};
+
 const EMOJI_SHORTCODES = {
   smile: '😄',
   grin: '😁',
@@ -77,6 +129,13 @@ const toReactionEntries = (reactions) => {
   return Object.entries(reactions)
     .map(([emoji, userIds]) => ({ emoji, userIds: Array.isArray(userIds) ? userIds : [] }))
     .filter((entry) => entry.userIds.length > 0);
+};
+
+
+const getReplyIdFromMessage = (message) => {
+  const firstReply = Array.isArray(message?.replies) ? message.replies[0] : null;
+  if (!firstReply) return null;
+  return typeof firstReply === 'string' ? firstReply : firstReply.id || firstReply._id || null;
 };
 
 const renderMessageContent = (content, users, channels, onUserClick) => {
@@ -118,7 +177,7 @@ const renderMessageContent = (content, users, channels, onUserClick) => {
       return EMOJI_SHORTCODES[emoji[1].toLowerCase()] || part;
     }
 
-    return <React.Fragment key={`${part}-${index}`}>{part}</React.Fragment>;
+    return <React.Fragment key={`${part}-${index}`}>{renderMarkdownInline(part, `md-${index}`)}</React.Fragment>;
   });
 };
 
@@ -318,6 +377,7 @@ function AppShell() {
   const loggedMissingUserFetchErrorRef = useRef(false);
   const wsReconnectTimeoutRef = useRef(null);
   const messageRefs = useRef({});
+  const replyMessageCacheRef = useRef({});
 
   const serverList = useMemo(() => Object.values(servers), [servers]);
 
@@ -417,6 +477,16 @@ function AppShell() {
     }
     return [];
   }, [peekUser]);
+
+
+  const peekAboutMe = useMemo(
+    () => peekUser?.profile?.content || peekUser?.profile?.bio || peekUser?.bio || null,
+    [peekUser],
+  );
+
+  const peekPlatformJoined = useMemo(() => getJoinedAt(peekUser), [peekUser]);
+  const peekServerJoined = useMemo(() => getJoinedAt(peekMember), [peekMember]);
+  const peekBannerUrl = useMemo(() => getBannerUrl(peekUser, config.cdnUrl), [peekUser, config.cdnUrl]);
 
   const isSameOriginApi = useMemo(() => {
     try {
@@ -583,13 +653,13 @@ function AppShell() {
           const list = prev[packet.channel] || [];
           if (list.find((m) => m._id === packet._id)) return prev;
           const nextMessages = [...list, packet].slice(-200);
-          return { ...prev, [packet.channel]: enrichReplies(nextMessages) };
+          return { ...prev, [packet.channel]: enrichReplies(nextMessages, packet.channel) };
         });
         break;
       case 'MessageUpdate':
         setMessages((prev) => ({
           ...prev,
-          [packet.channel]: enrichReplies((prev[packet.channel] || []).map((m) => (m._id === packet.id ? { ...m, ...packet.data } : m))),
+          [packet.channel]: enrichReplies((prev[packet.channel] || []).map((m) => (m._id === packet.id ? { ...m, ...packet.data } : m)), packet.channel),
         }));
         break;
       case 'MessageDelete':
@@ -742,6 +812,18 @@ function AppShell() {
   }, [currentMessages]);
 
   useEffect(() => {
+    if (!selectedChannelId || selectedChannelId === 'friends') return;
+
+    const missingReplyIds = currentMessages
+      .map((message) => getReplyIdFromMessage(message))
+      .filter((replyId) => replyId && !replyMessageCacheRef.current[replyId] && !currentMessageMap[replyId]);
+
+    [...new Set(missingReplyIds)].slice(0, 10).forEach((replyId) => {
+      void fetchReplyMessage(selectedChannelId, replyId);
+    });
+  }, [currentMessages, currentMessageMap, selectedChannelId]);
+
+  useEffect(() => {
     if (!voiceNotice) return undefined;
     const timeout = setTimeout(() => setVoiceNotice(''), 3500);
     return () => clearTimeout(timeout);
@@ -789,13 +871,35 @@ function AppShell() {
     }
   };
 
-  const enrichReplies = (nextMessages) => {
+  const resolveReplyPreview = (messageById, channelId, replyId) => {
+    const inBatch = messageById[replyId];
+    if (inBatch) return inBatch;
+
+    const inChannelState = (messages[channelId] || []).find((entry) => entry._id === replyId);
+    if (inChannelState) return inChannelState;
+
+    return replyMessageCacheRef.current[replyId] || null;
+  };
+
+  const enrichReplies = (nextMessages = [], channelId = selectedChannelId) => {
     const messageById = Object.fromEntries(nextMessages.map((entry) => [entry._id, entry]));
 
     return nextMessages.map((message) => {
-      const replyId = Array.isArray(message.replies) ? message.replies[0] : null;
-      const replyMessage = replyId ? messageById[replyId] : null;
-      if (!replyMessage) return message;
+      const replyId = getReplyIdFromMessage(message);
+      if (!replyId) return { ...message, replyMessage: null };
+
+      const replyMessage = resolveReplyPreview(messageById, channelId, replyId);
+      if (!replyMessage) {
+        return {
+          ...message,
+          replyMessage: {
+            _id: replyId,
+            content: 'Loading reply…',
+            authorId: null,
+            authorUser: null,
+          },
+        };
+      }
       const replyAuthorId = typeof replyMessage.author === 'string' ? replyMessage.author : replyMessage.author?._id;
 
       return {
@@ -808,6 +912,28 @@ function AppShell() {
         },
       };
     });
+  };
+
+  const fetchReplyMessage = async (channelId, replyId) => {
+    if (!channelId || !replyId || replyMessageCacheRef.current[replyId]) return;
+
+    try {
+      const res = await fetch(`${config.apiUrl}/channels/${channelId}/messages/${replyId}`, {
+        headers: { 'x-session-token': auth.token },
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data?._id) return;
+
+      replyMessageCacheRef.current[replyId] = data;
+      upsertUsersFromMessages([data]);
+      setMessages((prev) => ({
+        ...prev,
+        [channelId]: enrichReplies(prev[channelId] || [], channelId),
+      }));
+    } catch {
+      // no-op
+    }
   };
 
   const fetchMessages = async (channelId) => {
@@ -829,7 +955,7 @@ function AppShell() {
 
       upsertUsersFromMessages(payloadMessages);
       const orderedMessages = payloadMessages.reverse().slice(-200);
-      setMessages((prev) => ({ ...prev, [channelId]: enrichReplies(orderedMessages) }));
+      setMessages((prev) => ({ ...prev, [channelId]: enrichReplies(orderedMessages, channelId) }));
       void fetchMissingUsers(orderedMessages);
       preloadedChannelRef.current[channelId] = true;
     } catch {
@@ -1033,12 +1159,12 @@ function AppShell() {
       content,
       createdAt: new Date().toISOString(),
       reactions: {},
-      replies: replyingTo ? [replyingTo._id] : undefined,
+      replies: replyingTo ? [{ id: replyingTo._id, mention: false }] : undefined,
     };
 
     setMessages((prev) => {
       const list = prev[selectedChannelId] || [];
-      return { ...prev, [selectedChannelId]: enrichReplies([...list, optimisticMessage].slice(-200)) };
+      return { ...prev, [selectedChannelId]: enrichReplies([...list, optimisticMessage].slice(-200), selectedChannelId) };
     });
 
     try {
@@ -1051,7 +1177,7 @@ function AppShell() {
         body: JSON.stringify({
           content,
           nonce,
-          replies: replyingTo ? [replyingTo._id] : undefined,
+          replies: replyingTo ? [{ id: replyingTo._id, mention: false }] : undefined,
         }),
       });
 
@@ -1062,7 +1188,7 @@ function AppShell() {
         upsertUsersFromMessages([postedMessage]);
         setMessages((prev) => {
           const list = (prev[selectedChannelId] || []).map((entry) => (entry._id === pendingId ? postedMessage : entry));
-          return { ...prev, [selectedChannelId]: enrichReplies(list) };
+          return { ...prev, [selectedChannelId]: enrichReplies(list, selectedChannelId) };
         });
       }
 
@@ -1251,17 +1377,25 @@ function AppShell() {
 
       {peekUser ? (
         <Modal onClose={() => setPeekUser(null)} title="Member profile">
-          <div className="flex items-center gap-3 rounded-lg bg-[#1e1f22] p-3">
-            <Avatar alwaysAnimate cdnUrl={config.cdnUrl} size="lg" user={peekUser} />
-            <div>
-              <div className="text-base font-semibold text-white">{peekUser?.username || 'Unknown user'}</div>
-              <div className="text-xs text-gray-400">#{peekUser?.discriminator || '0000'}</div>
+          <div className="overflow-hidden rounded-lg bg-[#1e1f22]">
+            {peekBannerUrl ? <img alt="Profile banner" className="h-24 w-full object-cover" src={peekBannerUrl} /> : <div className="h-20 w-full bg-gradient-to-r from-[#3b3f6b] to-[#5865f2]" />}
+            <div className="flex items-center gap-3 p-3">
+              <Avatar alwaysAnimate cdnUrl={config.cdnUrl} size="lg" user={peekUser} />
+              <div>
+                <div className="text-base font-semibold text-white">{peekUser?.username || 'Unknown user'}</div>
+                <div className="text-xs text-gray-400">#{peekUser?.discriminator || '0000'}</div>
+              </div>
             </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-2 rounded-md bg-[#1e1f22] p-3 text-xs text-gray-300">
+            <p><span className="font-semibold text-gray-100">Joined platform:</span> {toDateLabel(peekPlatformJoined)}</p>
+            <p><span className="font-semibold text-gray-100">Joined server:</span> {selectedServerId === '@me' ? 'N/A' : toDateLabel(peekServerJoined)}</p>
           </div>
 
           <div className="space-y-1 rounded-md bg-[#1e1f22] p-3">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">About me</p>
-            <p className="text-sm text-gray-200">{peekUser?.profile?.content || peekUser?.status?.text || 'This user has not set an About Me yet.'}</p>
+            <p className="text-sm text-gray-200">{peekAboutMe || 'This user has not set an About Me yet.'}</p>
           </div>
 
           <div className="space-y-1 rounded-md bg-[#1e1f22] p-3">
