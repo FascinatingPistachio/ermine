@@ -6,6 +6,7 @@ import {
   LogOut,
   MessageSquare,
   Plus,
+  Paperclip,
   Reply,
   Send,
   Settings,
@@ -23,7 +24,7 @@ const getRuntimeConfig = () => {
   return {
     apiUrl: runtime.apiUrl || env.VITE_STOAT_API_URL || 'https://api.stoat.chat',
     wsUrl: runtime.wsUrl || env.VITE_STOAT_WS_URL || 'wss://stoat.chat/events',
-    cdnUrl: runtime.cdnUrl || env.VITE_STOAT_CDN_URL || 'https://autumn.revolt.chat',
+    cdnUrl: runtime.cdnUrl || env.VITE_STOAT_CDN_URL || 'https://cdn.stoatusercontent.com',
   };
 };
 
@@ -40,7 +41,7 @@ const toTime = (value) => {
 
 const getAvatarUrl = (user, cdnUrl) => {
   if (!user?.avatar?._id) return null;
-  return `${cdnUrl}/avatars/${user.avatar._id}?max_side=256`;
+  return `${cdnUrl}/avatars/${user.avatar._id}`;
 };
 
 const getIconUrl = (server, cdnUrl) => {
@@ -52,7 +53,7 @@ const getIconUrl = (server, cdnUrl) => {
 const getBannerUrl = (user, cdnUrl) => {
   const banner = user?.profile?.background || user?.banner;
   if (!banner?._id) return null;
-  return `${cdnUrl}/backgrounds/${banner._id}?max_side=1024`;
+  return `${cdnUrl}/backgrounds/${banner._id}`;
 };
 
 const getJoinedAt = (entry) => entry?.joined_at || entry?.joinedAt || entry?.created_at || entry?.createdAt || null;
@@ -138,10 +139,22 @@ const getReplyIdFromMessage = (message) => {
   return typeof firstReply === 'string' ? firstReply : firstReply.id || firstReply._id || null;
 };
 
-const renderMessageContent = (content, users, channels, onUserClick) => {
+
+const isCustomEmojiToken = (value) => /^:[A-Z0-9]{26}:$/i.test(value || '');
+
+const getCustomEmojiId = (token) => token?.slice(1, -1);
+
+const renderEmojiVisual = (token, customEmoji, cdnUrl) => {
+  if (customEmoji?.id) {
+    return <img alt={customEmoji.name || token} className="inline h-5 w-5 align-text-bottom" src={`${cdnUrl}/emojis/${customEmoji.id}`} />;
+  }
+  return token;
+};
+
+const renderMessageContent = (content, users, channels, onUserClick, customEmojiById, cdnUrl) => {
   if (!content) return null;
 
-  const parts = content.split(/(<@!?[A-Za-z0-9]+>|<#[A-Za-z0-9]+>|:[a-z0-9_+-]+:)/gi);
+  const parts = content.split(/(<@!?[A-Za-z0-9]+>|<#[A-Za-z0-9]+>|:[A-Za-z0-9_+-]+:)/g);
 
   return parts.map((part, index) => {
     if (!part) return null;
@@ -174,6 +187,15 @@ const renderMessageContent = (content, users, channels, onUserClick) => {
 
     const emoji = part.match(/^:([a-z0-9_+-]+):$/i);
     if (emoji) {
+      if (isCustomEmojiToken(part)) {
+        const customEmoji = customEmojiById[getCustomEmojiId(part)];
+        const source = customEmoji?.isPrivate ? 'Private server emoji' : customEmoji?.serverName ? `Server emoji from ${customEmoji.serverName}` : 'Custom emoji';
+        return (
+          <span className="mx-0.5 inline-flex items-center" key={`${part}-${index}`} title={`${customEmoji?.name || part} · ${source}`}>
+            {renderEmojiVisual(part, customEmoji, cdnUrl)}
+          </span>
+        );
+      }
       return EMOJI_SHORTCODES[emoji[1].toLowerCase()] || part;
     }
 
@@ -194,8 +216,7 @@ const Avatar = ({ user, cdnUrl, size = 'md', animateOnHover = false, alwaysAnima
   const src = (() => {
     if (!user?.avatar?._id) return null;
     const wantsAnimated = hasAnimatedAvatar && (alwaysAnimate || (animateOnHover && isHovered));
-    const formatQuery = wantsAnimated ? '&format=gif' : '';
-    return `${cdnUrl}/avatars/${user.avatar._id}?max_side=256${formatQuery}`;
+    return wantsAnimated ? `${cdnUrl}/avatars/${user.avatar._id}/original` : `${cdnUrl}/avatars/${user.avatar._id}`;
   })();
 
   return (
@@ -272,12 +293,13 @@ class AppErrorBoundary extends React.Component {
   }
 }
 
-const Message = ({ message, users, channels, me, onUserClick, cdnUrl, onToggleReaction, onReply, replyTarget, onJumpToMessage, registerMessageRef }) => {
+const Message = ({ message, users, channels, me, onUserClick, cdnUrl, onToggleReaction, onReply, replyTarget, onJumpToMessage, registerMessageRef, customEmojiById, reactionOptions }) => {
   const authorId = typeof message.author === 'string' ? message.author : message.author?._id;
   const author = users[authorId] || (typeof message.author === 'object' ? message.author : null) || { username: 'Unknown user' };
   const mine = me === authorId;
   const messageReactions = toReactionEntries(message.reactions);
   const replyPreview = message.replyMessage;
+  const [showReactionPicker, setShowReactionPicker] = useState(false);
 
   return (
     <article className="group flex gap-3 rounded px-4 py-2 hover:bg-[#2e3035]" ref={(node) => registerMessageRef(message._id, node)}>
@@ -303,28 +325,73 @@ const Message = ({ message, users, channels, me, onUserClick, cdnUrl, onToggleRe
           <time className="text-[11px] text-gray-500">{toTime(message.createdAt)}</time>
         </div>
         {message.content ? (
-          <p className="whitespace-pre-wrap break-words text-sm text-gray-200">{renderMessageContent(message.content, users, channels, onUserClick)}</p>
+          <p className="whitespace-pre-wrap break-words text-sm text-gray-200">{renderMessageContent(message.content, users, channels, onUserClick, customEmojiById, cdnUrl)}</p>
+        ) : null}
+        {Array.isArray(message.attachments) && message.attachments.length ? (
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {message.attachments.map((attachment, index) => {
+              const attachmentId = typeof attachment === 'string' ? attachment : attachment?._id || attachment?.id;
+              const attachmentName = attachment?.filename || attachment?.name || `attachment-${index + 1}`;
+              if (!attachmentId) return null;
+              return (
+                <a
+                  className="rounded bg-[#232428] px-2 py-1 text-xs text-[#bdc3ff] hover:bg-[#2f3136]"
+                  href={`${cdnUrl}/attachments/${attachmentId}`}
+                  key={attachmentId}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  📎 {attachmentName}
+                </a>
+              );
+            })}
+          </div>
         ) : null}
         <div className="mt-1 flex flex-wrap items-center gap-1.5">
           {messageReactions.map(({ emoji, userIds }) => {
             const reacted = userIds.includes(me);
+            const customEmoji = isCustomEmojiToken(emoji) ? customEmojiById[getCustomEmojiId(emoji)] : null;
+            const source = customEmoji?.isPrivate ? 'Private server emoji' : customEmoji?.serverName ? `Server emoji from ${customEmoji.serverName}` : 'Emoji';
             return (
               <button
                 className={`rounded-full border px-2 py-0.5 text-xs ${reacted ? 'border-[#5865f2] bg-[#5865f2]/20 text-[#d7ddff]' : 'border-[#4c4f56] bg-[#2b2d31] text-gray-200 hover:bg-[#35373c]'}`}
                 key={emoji}
                 onClick={() => onToggleReaction(message, emoji, reacted)}
+                title={`${customEmoji?.name || emoji} · ${source}`}
                 type="button"
               >
-                {emoji} {userIds.length}
+                {renderEmojiVisual(emoji, customEmoji, cdnUrl)} {userIds.length}
               </button>
             );
           })}
           <button className="rounded-full border border-[#4c4f56] px-2 py-0.5 text-xs text-gray-300 hover:bg-[#35373c]" onClick={() => onReply(message)} type="button">
             <Reply size={12} className="inline" /> Reply
           </button>
-          <button className="rounded-full border border-[#4c4f56] px-2 py-0.5 text-xs text-gray-300 hover:bg-[#35373c]" onClick={() => onToggleReaction(message, '👍', message.reactions?.['👍']?.includes(me))} type="button">
-            + React
-          </button>
+          <div className="relative">
+            <button className="rounded-full border border-[#4c4f56] px-2 py-0.5 text-xs text-gray-300 hover:bg-[#35373c]" onClick={() => setShowReactionPicker((prev) => !prev)} type="button">
+              + React
+            </button>
+            {showReactionPicker ? (
+              <div className="absolute bottom-7 left-0 z-30 w-56 rounded-lg border border-[#4c4f56] bg-[#232428] p-2 shadow-2xl">
+                <div className="grid grid-cols-6 gap-1">
+                  {reactionOptions.map((option) => (
+                    <button
+                      className="grid h-8 place-items-center rounded hover:bg-[#3a3d42]"
+                      key={option.value}
+                      onClick={() => {
+                        onToggleReaction(message, option.value, message.reactions?.[option.value]?.includes(me));
+                        setShowReactionPicker(false);
+                      }}
+                      title={option.title}
+                      type="button"
+                    >
+                      {option.custom ? renderEmojiVisual(option.value, option.custom, cdnUrl) : option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
           {replyTarget === message._id ? <span className="text-[11px] text-[#bdc3ff]">Reply target</span> : null}
         </div>
       </div>
@@ -355,6 +422,8 @@ function AppShell() {
   const [isMembersLoading, setIsMembersLoading] = useState(false);
   const [replyingTo, setReplyingTo] = useState(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState([]);
+  const [isUploadingFiles, setIsUploadingFiles] = useState(false);
   const [voiceNotice, setVoiceNotice] = useState('');
 
   const [loginMode, setLoginMode] = useState('credentials');
@@ -378,6 +447,7 @@ function AppShell() {
   const wsReconnectTimeoutRef = useRef(null);
   const messageRefs = useRef({});
   const replyMessageCacheRef = useRef({});
+  const fileInputRef = useRef(null);
 
   const serverList = useMemo(() => Object.values(servers), [servers]);
 
@@ -441,6 +511,39 @@ function AppShell() {
       name: value?.name || id,
     }));
   }, [selectedServer, selectedServerId]);
+
+
+  const customEmojiById = useMemo(() => {
+    const index = {};
+    Object.values(servers).forEach((server) => {
+      const source = server?.emojis || server?.emoji || [];
+      const entries = Array.isArray(source)
+        ? source.map((emoji) => ({ id: emoji?._id || emoji?.id, name: emoji?.name }))
+        : Object.entries(source || {}).map(([id, emoji]) => ({ id, name: emoji?.name }));
+
+      entries.forEach((emoji) => {
+        if (!emoji?.id) return;
+        index[emoji.id] = {
+          id: emoji.id,
+          name: emoji.name || emoji.id,
+          serverName: server?.name,
+          isPrivate: server?.discoverable === false,
+        };
+      });
+    });
+    return index;
+  }, [servers]);
+
+  const reactionOptions = useMemo(() => {
+    const base = EXTENDED_EMOJIS.map((emoji) => ({ value: emoji, label: emoji, title: emoji, custom: null }));
+    const serverSet = customEmojis.slice(0, 30).map((emoji) => {
+      const value = `:${emoji.id}:`;
+      const custom = customEmojiById[emoji.id];
+      const source = custom?.isPrivate ? 'Private server emoji' : custom?.serverName ? `Server emoji from ${custom.serverName}` : 'Custom emoji';
+      return { value, label: emoji.name, title: `${emoji.name} · ${source}`, custom };
+    });
+    return [...base, ...serverSet];
+  }, [customEmojis, customEmojiById]);
 
 
   const peekMember = useMemo(() => {
@@ -1145,12 +1248,17 @@ function AppShell() {
 
   const sendMessage = async () => {
     const content = inputText.trim();
-    if (!content || !selectedChannelId || selectedChannelId === 'friends') return;
+    const hasContent = Boolean(content);
+    const hasFiles = pendingFiles.length > 0;
+    if ((!hasContent && !hasFiles) || !selectedChannelId || selectedChannelId === 'friends') return;
 
     setInputText('');
+    setIsUploadingFiles(hasFiles);
+
     const nonce = crypto.randomUUID();
     const pendingId = `pending-${nonce}`;
     const meUser = users[auth.userId] || { _id: auth.userId, username: 'You' };
+
     const optimisticMessage = {
       _id: pendingId,
       channel: selectedChannelId,
@@ -1160,6 +1268,7 @@ function AppShell() {
       createdAt: new Date().toISOString(),
       reactions: {},
       replies: replyingTo ? [{ id: replyingTo._id, mention: false }] : undefined,
+      attachments: pendingFiles.map((file, index) => ({ _id: `pending-attachment-${index}-${file.name}`, filename: file.name })),
     };
 
     setMessages((prev) => {
@@ -1168,17 +1277,21 @@ function AppShell() {
     });
 
     try {
+      const attachmentIds = hasFiles ? await uploadFiles(pendingFiles) : [];
+      const payload = {
+        content,
+        nonce,
+        replies: replyingTo ? [{ id: replyingTo._id, mention: false }] : undefined,
+        attachments: attachmentIds.length ? attachmentIds : undefined,
+      };
+
       const res = await fetch(`${config.apiUrl}/channels/${selectedChannelId}/messages`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'x-session-token': auth.token,
         },
-        body: JSON.stringify({
-          content,
-          nonce,
-          replies: replyingTo ? [{ id: replyingTo._id, mention: false }] : undefined,
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) throw new Error('Failed to send message');
@@ -1192,6 +1305,7 @@ function AppShell() {
         });
       }
 
+      setPendingFiles([]);
       setReplyingTo(null);
       setShowEmojiPicker(false);
     } catch {
@@ -1200,6 +1314,8 @@ function AppShell() {
         [selectedChannelId]: (prev[selectedChannelId] || []).filter((entry) => entry._id !== pendingId),
       }));
       setInputText(content);
+    } finally {
+      setIsUploadingFiles(false);
     }
   };
 
@@ -1241,9 +1357,46 @@ function AppShell() {
     setShowEmojiPicker(false);
   };
 
-  const addCustomEmojiToComposer = (emojiName) => {
-    setInputText((prev) => `${prev}:${emojiName}:`);
+  const addCustomEmojiToComposer = (emojiId) => {
+    setInputText((prev) => `${prev}:${emojiId}:`);
     setShowEmojiPicker(false);
+  };
+
+  const handleFilePick = (event) => {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+    setPendingFiles((prev) => [...prev, ...files]);
+    event.target.value = '';
+  };
+
+  const removePendingFile = (index) => {
+    setPendingFiles((prev) => prev.filter((_, fileIndex) => fileIndex !== index));
+  };
+
+  const uploadFiles = async (files = []) => {
+    const ids = [];
+
+    for (const file of files) {
+      const body = new FormData();
+      body.append('file', file);
+
+      const res = await fetch(`${config.cdnUrl}/attachments`, {
+        method: 'POST',
+        body,
+        headers: {
+          'X-Session-Token': auth.token,
+        },
+      });
+
+      if (!res.ok) {
+        throw new Error('Failed to upload file');
+      }
+
+      const data = await res.json();
+      if (data?.id) ids.push(data.id);
+    }
+
+    return ids;
   };
 
   const createServer = async () => {
@@ -1546,8 +1699,10 @@ function AppShell() {
                 onToggleReaction={toggleReaction}
                 onUserClick={openUserProfile}
                 onJumpToMessage={jumpToMessage}
+                reactionOptions={reactionOptions}
                 registerMessageRef={registerMessageRef}
                 replyTarget={replyingTo?._id}
+                customEmojiById={customEmojiById}
                 users={users}
               />
             ))
@@ -1566,7 +1721,27 @@ function AppShell() {
               </button>
             </div>
           ) : null}
+          {pendingFiles.length ? (
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {pendingFiles.map((file, index) => (
+                <button className="rounded bg-[#2b2d31] px-2 py-1 text-xs text-gray-200 hover:bg-[#35373c]" key={`${file.name}-${index}`} onClick={() => removePendingFile(index)} type="button">
+                  📎 {file.name} <span className="text-gray-400">(remove)</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+
           <div className="flex items-center gap-2 rounded-lg bg-[#383a40] p-2">
+            <button
+              className="rounded p-2 text-gray-300 hover:bg-[#4b4d55] hover:text-white"
+              disabled={selectedChannelId === 'friends' || isUploadingFiles}
+              onClick={() => fileInputRef.current?.click()}
+              title="Upload files"
+              type="button"
+            >
+              <Paperclip size={16} />
+            </button>
+            <input className="hidden" multiple onChange={handleFilePick} ref={fileInputRef} type="file" />
             <div className="relative">
               <button
                 className="rounded p-2 text-gray-300 hover:bg-[#4b4d55] hover:text-white"
@@ -1590,11 +1765,16 @@ function AppShell() {
                     <>
                       <p className="mb-1 mt-2 text-[10px] uppercase tracking-wide text-gray-500">Server emojis</p>
                       <div className="flex max-h-24 flex-wrap gap-1 overflow-y-auto">
-                        {customEmojis.map((emoji) => (
-                          <button className="rounded bg-[#303239] px-1.5 py-1 text-xs text-gray-200 hover:bg-[#3a3d42]" key={emoji.id || emoji.name} onClick={() => addCustomEmojiToComposer(emoji.name)} type="button">
-                            :{emoji.name}:
-                          </button>
-                        ))}
+                        {customEmojis.map((emoji) => {
+                          const custom = customEmojiById[emoji.id];
+                          const source = custom?.isPrivate ? 'Private server emoji' : custom?.serverName ? `Server emoji from ${custom.serverName}` : 'Custom emoji';
+                          return (
+                            <button className="flex items-center gap-1 rounded bg-[#303239] px-1.5 py-1 text-xs text-gray-200 hover:bg-[#3a3d42]" key={emoji.id || emoji.name} onClick={() => addCustomEmojiToComposer(emoji.id)} title={`${emoji.name} · ${source}`} type="button">
+                              {renderEmojiVisual(`:${emoji.id}:`, custom, config.cdnUrl)}
+                              <span>:{emoji.name}:</span>
+                            </button>
+                          );
+                        })}
                       </div>
                     </>
                   ) : null}
@@ -1614,7 +1794,7 @@ function AppShell() {
               placeholder={selectedChannelId === 'friends' ? 'Select a text channel to chat.' : `Enter message in #${currentChannelName}`}
               value={inputText}
             />
-            <button className="rounded p-2 text-gray-300 hover:bg-[#4b4d55] hover:text-white" onClick={sendMessage} type="button">
+            <button className="rounded p-2 text-gray-300 hover:bg-[#4b4d55] hover:text-white disabled:cursor-not-allowed disabled:opacity-60" disabled={isUploadingFiles} onClick={sendMessage} type="button">
               <Send size={16} />
             </button>
           </div>
