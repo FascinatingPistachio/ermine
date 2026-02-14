@@ -78,17 +78,18 @@ const Modal = ({ title, onClose, children }) => (
 );
 
 const Message = ({ message, users, me, onUserClick, cdnUrl }) => {
-  const author = users[message.author] || { username: 'Unknown user' };
-  const mine = me === message.author;
+  const authorId = typeof message.author === 'string' ? message.author : message.author?._id;
+  const author = users[authorId] || (typeof message.author === 'object' ? message.author : null) || { username: 'Unknown user' };
+  const mine = me === authorId;
 
   return (
     <article className="group flex gap-3 rounded px-4 py-2 hover:bg-[#2e3035]">
-      <button className="mt-0.5" onClick={() => onUserClick(author)}>
+      <button className="mt-0.5" onClick={() => onUserClick(author, authorId)}>
         <Avatar cdnUrl={cdnUrl} user={author} />
       </button>
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">
-          <button className="text-sm font-semibold text-white hover:underline" onClick={() => onUserClick(author)}>
+          <button className="text-sm font-semibold text-white hover:underline" onClick={() => onUserClick(author, authorId)}>
             {author.username}
           </button>
           {mine && <span className="rounded bg-[#5865f2]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[#bdc3ff]">YOU</span>}
@@ -149,6 +150,16 @@ export default function App() {
       .filter((m) => Boolean(m.user))
       .sort((a, b) => a.user.username.localeCompare(b.user.username));
   }, [members, selectedServerId, users]);
+
+  const openUserProfile = (user, fallbackId = null) => {
+    const stableId = user?._id || fallbackId || 'unknown-user';
+    setPeekUser({
+      ...user,
+      _id: stableId,
+      username: user?.username || 'Unknown user',
+      discriminator: user?.discriminator || '0000',
+    });
+  };
 
   const friends = useMemo(
     () => Object.values(users).filter((u) => u.relationship === 'Friend' || u.relationship === 1),
@@ -246,7 +257,30 @@ export default function App() {
           });
           setStatus('ready');
           break;
+        case 'Bulk':
+          packet.v?.forEach((event) => {
+            if (event.type === 'UserUpdate') {
+              setUsers((prev) => ({ ...prev, [event.id]: { ...prev[event.id], ...event.data } }));
+            }
+            if (event.type === 'ServerMemberUpdate' && event.data) {
+              setMembers((prev) => ({
+                ...prev,
+                [`${event.id.server}:${event.id.user}`]: {
+                  ...prev[`${event.id.server}:${event.id.user}`],
+                  _id: event.id,
+                  ...event.data,
+                },
+              }));
+            }
+          });
+          break;
         case 'Message':
+          if (packet.user?._id) {
+            setUsers((prev) => ({ ...prev, [packet.user._id]: packet.user }));
+          }
+          if (typeof packet.author === 'object' && packet.author?._id) {
+            setUsers((prev) => ({ ...prev, [packet.author._id]: packet.author }));
+          }
           setMessages((prev) => {
             const list = prev[packet.channel] || [];
             if (list.find((m) => m._id === packet._id)) return prev;
@@ -326,7 +360,21 @@ export default function App() {
       });
       if (!res.ok) return;
       const data = await res.json();
-      setMessages((prev) => ({ ...prev, [channelId]: Array.isArray(data) ? data.reverse() : [] }));
+
+      const payloadMessages = Array.isArray(data) ? data : data.messages || [];
+      const payloadUsers = Array.isArray(data) ? [] : data.users || [];
+
+      if (payloadUsers.length) {
+        setUsers((prev) => {
+          const next = { ...prev };
+          payloadUsers.forEach((u) => {
+            next[u._id] = u;
+          });
+          return next;
+        });
+      }
+
+      setMessages((prev) => ({ ...prev, [channelId]: payloadMessages.reverse() }));
     } catch {
       // no-op
     }
@@ -558,8 +606,8 @@ export default function App() {
           <div className="flex items-center gap-3 rounded-lg bg-[#1e1f22] p-3">
             <Avatar cdnUrl={config.cdnUrl} size="lg" user={peekUser} />
             <div>
-              <div className="text-base font-semibold text-white">{peekUser.username}</div>
-              <div className="text-xs text-gray-400">#{peekUser.discriminator || '0000'}</div>
+              <div className="text-base font-semibold text-white">{peekUser?.username || 'Unknown user'}</div>
+              <div className="text-xs text-gray-400">#{peekUser?.discriminator || '0000'}</div>
             </div>
           </div>
           <p className="text-xs text-gray-400">Ermine profile popout for stoat.chat members.</p>
@@ -638,7 +686,7 @@ export default function App() {
               <h2 className="text-xs font-bold uppercase tracking-wide text-gray-400">Friends ({friends.length})</h2>
               {friends.length === 0 ? <p className="text-sm text-gray-400">No friends available yet.</p> : null}
               {friends.map((friend) => (
-                <button className="flex w-full items-center gap-3 rounded bg-[#2b2d31] p-3 text-left hover:bg-[#35373c]" key={friend._id} onClick={() => setPeekUser(friend)}>
+                <button className="flex w-full items-center gap-3 rounded bg-[#2b2d31] p-3 text-left hover:bg-[#35373c]" key={friend._id} onClick={() => openUserProfile(friend, friend._id)}>
                   <Avatar cdnUrl={config.cdnUrl} user={friend} />
                   <div className="min-w-0">
                     <div className="truncate text-sm font-semibold text-white">{friend.username}</div>
@@ -649,7 +697,7 @@ export default function App() {
             </div>
           ) : (
             currentMessages.map((message) => (
-              <Message cdnUrl={config.cdnUrl} key={message._id} me={auth.userId} message={message} onUserClick={setPeekUser} users={users} />
+              <Message cdnUrl={config.cdnUrl} key={message._id} me={auth.userId} message={message} onUserClick={openUserProfile} users={users} />
             ))
           )}
           <div ref={messagesBottomRef} />
@@ -672,11 +720,11 @@ export default function App() {
         </footer>
       </main>
 
-      <aside className="hidden w-60 border-l border-[#202225] bg-[#2b2d31] lg:block">
+      <aside className="hidden w-60 flex-col border-l border-[#202225] bg-[#2b2d31] lg:flex">
         <div className="border-b border-[#202225] px-4 py-3 text-xs font-bold uppercase tracking-wide text-gray-400">Members — {currentMembers.length}</div>
-        <div className="space-y-1 overflow-y-auto p-2">
+        <div className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
           {currentMembers.map((member) => (
-            <button className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-[#35373c]" key={member._id.user} onClick={() => setPeekUser(member.user)}>
+            <button className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-[#35373c]" key={member._id.user} onClick={() => openUserProfile(member.user, member._id.user)}>
               <Avatar cdnUrl={config.cdnUrl} size="sm" user={member.user} />
               <div className="min-w-0">
                 <div className="truncate text-sm text-gray-200">{member.nickname || member.user.username}</div>
