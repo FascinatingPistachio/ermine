@@ -190,7 +190,7 @@ const Message = ({ msg, users, cdnUrl, currentUserId, onReply, onEdit, onDelete,
         }
         
         // Text formatting
-        const textParts = part.split(/(<@[A-Z0-9]+>|\*\*.*?\*\*|https?:\/\/[^\s]+)/g);
+        const textParts = part.split(/(<@[A-Za-z0-9]+>|\*\*.*?\*\*|https?:\/\/[^\s]+)/g);
         
         return (
             <span key={idx}>
@@ -222,7 +222,7 @@ const Message = ({ msg, users, cdnUrl, currentUserId, onReply, onEdit, onDelete,
              if (att.metadata?.type === 'Image') {
                 return <img key={att._id} src={url} alt={att.filename} className="max-w-[300px] max-h-[300px] rounded-md border border-gray-700 bg-gray-900" />
              }
-             return <a key={att._id} href={url} target="_blank" className="flex items-center gap-2 bg-gray-800 p-2 rounded border border-gray-700 text-blue-400 text-sm"><FileText size={16}/> {att.filename}</a>
+             return <a key={att._id} href={url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 bg-gray-800 p-2 rounded border border-gray-700 text-blue-400 text-sm"><FileText size={16}/> {att.filename}</a>
           })}
        </div>
     );
@@ -240,7 +240,7 @@ const Message = ({ msg, users, cdnUrl, currentUserId, onReply, onEdit, onDelete,
        <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
              <span className="font-bold text-gray-200 text-sm hover:underline cursor-pointer" onClick={() => onUserClick(user)}>{user.username}</span>
-             <span className="text-[10px] text-gray-500">{new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+             <span className="text-[10px] text-gray-500">{msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
           </div>
           <div className="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap break-words">
              {renderContent()}
@@ -582,6 +582,8 @@ export default function App() {
   const sendMessage = async () => {
     if (!inputText.trim() || !selectedChannelId) return;
     const content = inputText;
+    const activeEditId = editingId;
+    const activeReply = replyingTo;
     
     // Clear Input immediately for UX
     setInputText('');
@@ -589,9 +591,9 @@ export default function App() {
     setEditingId(null);
 
     try {
-      if (editingId) {
+      if (activeEditId) {
          // Edit Mode
-         await fetch(`${config.apiUrl}/channels/${selectedChannelId}/messages/${editingId}`, {
+         await fetch(`${config.apiUrl}/channels/${selectedChannelId}/messages/${activeEditId}`, {
            method: 'PATCH',
            headers: { 'Content-Type': 'application/json', 'x-session-token': auth.token },
            body: JSON.stringify({ content })
@@ -601,7 +603,7 @@ export default function App() {
          const payload = { 
             content, 
             nonce: Math.random().toString(36).substring(7),
-            replies: replyingTo ? [{ id: replyingTo._id, mention: true }] : undefined
+            replies: activeReply ? [{ id: activeReply._id, mention: true }] : undefined
          };
          
          await fetch(`${config.apiUrl}/channels/${selectedChannelId}/messages`, {
