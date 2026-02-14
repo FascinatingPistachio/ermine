@@ -65,6 +65,37 @@ const toDateLabel = (value) => {
   return date.toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' });
 };
 
+
+const shouldTrustLink = (url) => window.confirm(`Do you trust this link?
+
+${url}`);
+
+const LinkAnchor = ({ href, children, className = 'text-[#8ea1ff] underline hover:text-[#bdc3ff]' }) => (
+  <a
+    className={className}
+    href={href}
+    onClick={(event) => {
+      if (!shouldTrustLink(href)) event.preventDefault();
+    }}
+    rel="noreferrer"
+    target="_blank"
+  >
+    {children}
+  </a>
+);
+
+const renderLinksInText = (value, keyPrefix = 'link') => {
+  if (!value) return null;
+  const parts = value.split(/(https?:\/\/[^\s]+)/gi);
+  return parts.map((part, index) => {
+    if (!part) return null;
+    if (/^https?:\/\//i.test(part)) {
+      return <LinkAnchor href={part} key={`${keyPrefix}-${index}`}>{part}</LinkAnchor>;
+    }
+    return <React.Fragment key={`${keyPrefix}-${index}`}>{part}</React.Fragment>;
+  });
+};
+
 const renderMarkdownInline = (text, keyPrefix = 'md') => {
   if (!text) return null;
   const tokens = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|__[^_]+__|~~[^~]+~~|\[[^\]]+\]\([^\)]+\))/g);
@@ -94,10 +125,10 @@ const renderMarkdownInline = (text, keyPrefix = 'md') => {
 
     const markdownLink = token.match(/^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/i);
     if (markdownLink) {
-      return <a className="text-[#8ea1ff] underline hover:text-[#bdc3ff]" href={markdownLink[2]} key={`${keyPrefix}-${index}`} rel="noreferrer" target="_blank">{markdownLink[1]}</a>;
+      return <LinkAnchor href={markdownLink[2]} key={`${keyPrefix}-${index}`}>{markdownLink[1]}</LinkAnchor>;
     }
 
-    return <React.Fragment key={`${keyPrefix}-${index}`}>{token}</React.Fragment>;
+    return <React.Fragment key={`${keyPrefix}-${index}`}>{renderLinksInText(token, `${keyPrefix}-plain-${index}`)}</React.Fragment>;
   });
 };
 
@@ -458,6 +489,7 @@ function AppShell() {
   const [pendingFiles, setPendingFiles] = useState([]);
   const [isUploadingFiles, setIsUploadingFiles] = useState(false);
   const [voiceNotice, setVoiceNotice] = useState('');
+  const [showGoLatest, setShowGoLatest] = useState(false);
 
   const [loginMode, setLoginMode] = useState('credentials');
   const [email, setEmail] = useState('');
@@ -470,6 +502,7 @@ function AppShell() {
 
   const wsRef = useRef(null);
   const messagesBottomRef = useRef(null);
+  const messagesContainerRef = useRef(null);
   const subscriptionRef = useRef({});
   const preloadedChannelRef = useRef({});
   const preloadedMembersRef = useRef({});
@@ -943,8 +976,34 @@ function AppShell() {
     };
   }, [selectedServerId, status]);
 
+  const isNearBottom = () => {
+    const container = messagesContainerRef.current;
+    if (!container) return true;
+    const threshold = 72;
+    return container.scrollHeight - container.scrollTop - container.clientHeight <= threshold;
+  };
+
   useEffect(() => {
-    messagesBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      const nearBottom = isNearBottom();
+      if (nearBottom) setShowGoLatest(false);
+    };
+
+    container.addEventListener('scroll', handleScroll);
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, [selectedChannelId]);
+
+  useEffect(() => {
+    if (isNearBottom()) {
+      messagesBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+      setShowGoLatest(false);
+      return;
+    }
+
+    setShowGoLatest(true);
   }, [currentMessages]);
 
   useEffect(() => {
@@ -1202,6 +1261,12 @@ function AppShell() {
     } else {
       delete messageRefs.current[messageId];
     }
+  };
+
+
+  const goToLatest = () => {
+    messagesBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    setShowGoLatest(false);
   };
 
   const handleLogin = async (event) => {
@@ -1701,7 +1766,7 @@ function AppShell() {
         </div>
       </aside>
 
-      <main className="flex min-w-0 flex-1 flex-col bg-[#313338]">
+      <main className="relative flex min-w-0 flex-1 flex-col bg-[#313338]">
         <header className="flex items-center justify-between border-b border-[#202225] px-4 py-3">
           <div className="flex items-center gap-2 text-sm font-semibold text-white">
             {channels[selectedChannelId]?.channel_type === 'DirectMessage' ? <MessageSquare size={17} className="text-gray-400" /> : <Hash size={17} className="text-gray-400" />}
@@ -1716,7 +1781,7 @@ function AppShell() {
           </div>
         ) : null}
 
-        <section className="flex-1 overflow-y-auto py-2">
+        <section className="flex-1 overflow-y-auto py-2" ref={messagesContainerRef}>
           {selectedChannelId === 'friends' ? (
             <div className="space-y-2 p-4">
               <h2 className="text-xs font-bold uppercase tracking-wide text-gray-400">Friends ({friends.length})</h2>
@@ -1753,6 +1818,14 @@ function AppShell() {
           )}
           <div ref={messagesBottomRef} />
         </section>
+
+        {showGoLatest ? (
+          <div className="pointer-events-none absolute bottom-24 left-1/2 z-20 -translate-x-1/2">
+            <button className="pointer-events-auto rounded-full bg-[#5865f2] px-3 py-1.5 text-xs font-semibold text-white shadow-lg hover:bg-[#4956d8]" onClick={goToLatest} type="button">
+              Go to latest
+            </button>
+          </div>
+        ) : null}
 
         <footer className="border-t border-[#202225] p-4">
           {activeReply ? (
