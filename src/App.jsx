@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Send, Hash, Settings, LogOut, MessageSquare, Users, Image as ImageIcon, FileText, User, AlertCircle, ShieldCheck, Key, Menu, X, Bookmark, Plus, XCircle, UserPlus, Check, MoreVertical, Activity, Edit2, Trash2, Reply, Smile, CornerUpLeft } from 'lucide-react';
+import { Send, Hash, Settings, MessageSquare, Users, Image as ImageIcon, FileText, AlertCircle, ShieldCheck, Menu, X, Bookmark, Plus, UserPlus, Activity, Edit2, Trash2, Reply, CornerUpLeft } from 'lucide-react';
 
 /**
  * STOAT / REVOLT CLIENT - CODEGEM EDITION (v6.0)
@@ -35,6 +35,13 @@ const generateIconUrl = (server, cdnUrl) => {
 
 const generateAttachmentUrl = (attachment, cdnUrl) => {
   return `${cdnUrl}/attachments/${attachment._id}`;
+};
+
+const formatMessageTime = (createdAt) => {
+  if (!createdAt) return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const parsed = new Date(createdAt);
+  if (Number.isNaN(parsed.getTime())) return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return parsed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
 
 // --- Components ---
@@ -190,7 +197,7 @@ const Message = ({ msg, users, cdnUrl, currentUserId, onReply, onEdit, onDelete,
         }
         
         // Text formatting
-        const textParts = part.split(/(<@[A-Z0-9]+>|\*\*.*?\*\*|https?:\/\/[^\s]+)/g);
+        const textParts = part.split(/(<@[A-Za-z0-9]+>|\*\*.*?\*\*|https?:\/\/[^\s]+)/g);
         
         return (
             <span key={idx}>
@@ -220,9 +227,9 @@ const Message = ({ msg, users, cdnUrl, currentUserId, onReply, onEdit, onDelete,
           {msg.attachments.map(att => {
              const url = generateAttachmentUrl(att, cdnUrl);
              if (att.metadata?.type === 'Image') {
-                return <img key={att._id} src={url} alt={att.filename} className="max-w-[300px] max-h-[300px] rounded-md border border-gray-700 bg-gray-900" />
+                return <img key={att._id} src={url} alt={att.filename} loading="lazy" decoding="async" className="max-w-[300px] max-h-[300px] rounded-md border border-gray-700 bg-gray-900" />
              }
-             return <a key={att._id} href={url} target="_blank" className="flex items-center gap-2 bg-gray-800 p-2 rounded border border-gray-700 text-blue-400 text-sm"><FileText size={16}/> {att.filename}</a>
+             return <a key={att._id} href={url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 bg-gray-800 p-2 rounded border border-gray-700 text-blue-400 text-sm"><FileText size={16}/> {att.filename}</a>
           })}
        </div>
     );
@@ -240,7 +247,7 @@ const Message = ({ msg, users, cdnUrl, currentUserId, onReply, onEdit, onDelete,
        <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
              <span className="font-bold text-gray-200 text-sm hover:underline cursor-pointer" onClick={() => onUserClick(user)}>{user.username}</span>
-             <span className="text-[10px] text-gray-500">{new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+             <span className="text-[10px] text-gray-500">{formatMessageTime(msg.createdAt)}</span>
           </div>
           <div className="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap break-words">
              {renderContent()}
@@ -411,7 +418,9 @@ export default function App() {
       } catch (e) { console.error(e); }
     };
 
-    socket.onclose = () => { if (status !== 'error') setStatus('disconnected'); };
+    socket.onclose = () => {
+      setStatus(prev => (prev === 'error' ? prev : 'disconnected'));
+    };
     socket.onerror = () => setStatus('error');
 
     const pingInterval = setInterval(() => {
@@ -582,6 +591,8 @@ export default function App() {
   const sendMessage = async () => {
     if (!inputText.trim() || !selectedChannelId) return;
     const content = inputText;
+    const activeEditId = editingId;
+    const activeReply = replyingTo;
     
     // Clear Input immediately for UX
     setInputText('');
@@ -589,9 +600,9 @@ export default function App() {
     setEditingId(null);
 
     try {
-      if (editingId) {
+      if (activeEditId) {
          // Edit Mode
-         await fetch(`${config.apiUrl}/channels/${selectedChannelId}/messages/${editingId}`, {
+         await fetch(`${config.apiUrl}/channels/${selectedChannelId}/messages/${activeEditId}`, {
            method: 'PATCH',
            headers: { 'Content-Type': 'application/json', 'x-session-token': auth.token },
            body: JSON.stringify({ content })
@@ -601,7 +612,7 @@ export default function App() {
          const payload = { 
             content, 
             nonce: Math.random().toString(36).substring(7),
-            replies: replyingTo ? [{ id: replyingTo._id, mention: true }] : undefined
+            replies: activeReply ? [{ id: activeReply._id, mention: true }] : undefined
          };
          
          await fetch(`${config.apiUrl}/channels/${selectedChannelId}/messages`, {
@@ -610,7 +621,12 @@ export default function App() {
            body: JSON.stringify(payload)
          });
       }
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      console.error(err);
+      setInputText(content);
+      setReplyingTo(activeReply);
+      setEditingId(activeEditId);
+    }
   };
 
   const deleteMessage = async (msgId) => {
@@ -952,7 +968,7 @@ export default function App() {
       <div className="w-18 bg-gray-900 flex flex-col items-center py-4 gap-2 border-r border-gray-800 h-full overflow-y-auto no-scrollbar flex-shrink-0">
         <button onClick={() => handleServerSelect('@me')} className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${selectedServerId === '@me' ? 'bg-rose-600 rounded-2xl' : 'bg-gray-700 hover:bg-rose-600 hover:rounded-2xl'}`}><MessageSquare size={24} className="text-white" /></button>
         <div className="w-8 h-0.5 bg-gray-800 rounded-full my-1" />
-        {Object.values(servers).map(server => {
+        {serverList.map(server => {
           const iconUrl = generateIconUrl(server, config.cdnUrl);
           return (
             <button key={server._id} onClick={() => handleServerSelect(server._id)} className={`group relative w-12 h-12 rounded-full flex items-center justify-center transition-all ${selectedServerId === server._id ? 'rounded-2xl ring-2 ring-rose-500' : 'bg-gray-700 hover:rounded-2xl hover:bg-rose-600'}`}>
