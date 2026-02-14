@@ -56,3 +56,10 @@ For environment-specific endpoints, set these Vercel environment variables:
 - `VITE_STOAT_CDN_URL`
 
 The app will use those values at build time, while still allowing manual overrides from **Advanced connection settings** on the login screen.
+
+## Privacy and GDPR direction
+
+- Ermine stores session details in browser cookies (`ermine_session_token`, `ermine_user_id`, `ermine_api_url`) for authentication continuity.
+- Ermine does not persist personal user data on Ermine repositories or Ermine-hosted servers.
+- Network communication is limited to configured official stoat.chat endpoints.
+- See `privacy-policy.html` for the user-facing privacy notice.
