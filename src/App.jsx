@@ -157,6 +157,45 @@ const Modal = ({ title, onClose, children }) => (
   </div>
 );
 
+
+class AppErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error) {
+    console.error('Ermine crashed:', error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="grid min-h-screen place-items-center bg-[#1e1f22] p-6 text-gray-100">
+          <div className="w-full max-w-lg rounded-2xl border border-[#202225] bg-[#2b2d31] p-8 text-center shadow-2xl">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#949ba4]">Well, this is awkward</p>
+            <h1 className="mt-3 text-2xl font-bold text-white">Looks like Ermine crashed.</h1>
+            <p className="mt-2 text-sm text-gray-300">Try reloading the app. If it keeps happening, relog and reconnect to stoat.chat.</p>
+            <button
+              className="mt-6 rounded-md bg-[#5865f2] px-4 py-2 text-sm font-semibold text-white hover:bg-[#4956d8]"
+              onClick={() => window.location.reload()}
+              type="button"
+            >
+              Reload Ermine
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 const Message = ({ message, users, channels, me, onUserClick, cdnUrl, onToggleReaction, onReply, replyTarget }) => {
   const authorId = typeof message.author === 'string' ? message.author : message.author?._id;
   const author = users[authorId] || (typeof message.author === 'object' ? message.author : null) || { username: 'Unknown user' };
@@ -217,7 +256,7 @@ const Message = ({ message, users, channels, me, onUserClick, cdnUrl, onToggleRe
   );
 };
 
-export default function App() {
+function AppShell() {
   const [view, setView] = useState('loading');
   const [status, setStatus] = useState('disconnected');
   const [config, setConfig] = useState({ apiUrl: DEFAULT_API_URL, wsUrl: DEFAULT_WS_URL, cdnUrl: DEFAULT_CDN_URL });
@@ -1071,3 +1110,12 @@ export default function App() {
     </div>
   );
 }
+
+export default function App() {
+  return (
+    <AppErrorBoundary>
+      <AppShell />
+    </AppErrorBoundary>
+  );
+}
+
