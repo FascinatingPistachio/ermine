@@ -362,6 +362,46 @@ const Message = ({ message, users, channels, me, onUserClick, cdnUrl, onToggleRe
   const [showReactionPicker, setShowReactionPicker] = useState(false);
   const [isMessageHovered, setIsMessageHovered] = useState(false);
   const embeddedGifUrls = useMemo(() => extractUrls(message.content || '').filter(isEmbeddableGifLink), [message.content]);
+  const [resolvedGifUrls, setResolvedGifUrls] = useState({});
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const resolveTenorUrls = async () => {
+      const tenorLinks = embeddedGifUrls.filter((url) => /^https?:\/\/tenor\.com\//i.test(url));
+      if (!tenorLinks.length) return;
+
+      const results = await Promise.all(
+        tenorLinks.map(async (url) => {
+          try {
+            const response = await fetch(`https://tenor.com/oembed?url=${encodeURIComponent(url)}`);
+            if (!response.ok) return [url, url];
+            const data = await response.json();
+            return [url, data?.url || data?.thumbnail_url || url];
+          } catch {
+            return [url, url];
+          }
+        }),
+      );
+
+      if (!cancelled) {
+        setResolvedGifUrls((prev) => ({ ...prev, ...Object.fromEntries(results) }));
+      }
+    };
+
+    void resolveTenorUrls();
+    return () => {
+      cancelled = true;
+    };
+  }, [embeddedGifUrls]);
+
+  const contentWithoutEmbeddedGifLinks = useMemo(() => {
+    let next = message.content || '';
+    embeddedGifUrls.forEach((url) => {
+      next = next.split(url).join('');
+    });
+    return next.trim();
+  }, [embeddedGifUrls, message.content]);
 
   return (
     <article className="group flex gap-3 rounded px-4 py-2 hover:bg-[#2e3035]" onMouseEnter={() => setIsMessageHovered(true)} onMouseLeave={() => setIsMessageHovered(false)} ref={(node) => registerMessageRef(message._id, node)}>
@@ -386,16 +426,19 @@ const Message = ({ message, users, channels, me, onUserClick, cdnUrl, onToggleRe
           {mine && <span className="rounded bg-[#5865f2]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[#bdc3ff]">YOU</span>}
           <time className="text-[11px] text-gray-500">{toTime(message.createdAt)}</time>
         </div>
-        {message.content ? (
-          <p className="whitespace-pre-wrap break-words text-sm text-gray-200">{renderMessageContent(message.content, users, channels, onUserClick, customEmojiById, cdnUrl, onRequestOpenLink)}</p>
+        {contentWithoutEmbeddedGifLinks ? (
+          <p className="whitespace-pre-wrap break-words text-sm text-gray-200">{renderMessageContent(contentWithoutEmbeddedGifLinks, users, channels, onUserClick, customEmojiById, cdnUrl, onRequestOpenLink)}</p>
         ) : null}
         {embeddedGifUrls.length ? (
           <div className="mt-1.5 flex flex-wrap gap-2">
-            {embeddedGifUrls.slice(0, 3).map((url) => (
-              <button className="block overflow-hidden rounded border border-[#3a3d42]" key={url} onClick={() => onRequestOpenLink(url)} title={url} type="button">
-                <img alt="Embedded GIF" className="max-h-52 max-w-[320px] object-contain" src={url} />
-              </button>
-            ))}
+            {embeddedGifUrls.slice(0, 3).map((url) => {
+              const renderUrl = resolvedGifUrls[url] || url;
+              return (
+                <button className="block overflow-hidden rounded border border-[#3a3d42]" key={url} onClick={() => onRequestOpenLink(url)} title={url} type="button">
+                  <img alt="Embedded GIF" className="max-h-52 max-w-[320px] object-contain" src={renderUrl} />
+                </button>
+              );
+            })}
           </div>
         ) : null}
         {Array.isArray(message.attachments) && message.attachments.length ? (
@@ -534,6 +577,7 @@ function AppShell() {
   const messageRefs = useRef({});
   const replyMessageCacheRef = useRef({});
   const fileInputRef = useRef(null);
+  const autoFollowRef = useRef(true);
 
   const serverList = useMemo(() => Object.values(servers), [servers]);
 
@@ -1007,9 +1051,12 @@ function AppShell() {
     const container = messagesContainerRef.current;
     if (!container) return;
 
+    autoFollowRef.current = true;
+
     const handleScroll = () => {
       const nearBottom = isNearBottom();
-      if (nearBottom) setShowGoLatest(false);
+      autoFollowRef.current = nearBottom;
+      setShowGoLatest(!nearBottom);
     };
 
     container.addEventListener('scroll', handleScroll);
@@ -1017,8 +1064,9 @@ function AppShell() {
   }, [selectedChannelId]);
 
   useEffect(() => {
-    if (isNearBottom()) {
+    if (autoFollowRef.current || isNearBottom()) {
       messagesBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+      autoFollowRef.current = true;
       setShowGoLatest(false);
       return;
     }
@@ -1285,6 +1333,7 @@ function AppShell() {
 
 
   const goToLatest = () => {
+    autoFollowRef.current = true;
     messagesBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     setShowGoLatest(false);
   };
