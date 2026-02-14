@@ -1,6 +1,6 @@
 # Ermine
 
-Ermine is a Discord-inspired web client for **stoat.chat** with custom branding, a cleaner layout, and a more polished day-to-day chat experience.
+Ermine is a Discord-inspired web client for **stoat.chat** with custom branding and a cleaner layout. It is currently **experimental**, known to be **buggy**, and still missing many expected features.
 
 ## Highlights
 
