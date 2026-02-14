@@ -47,7 +47,7 @@ This app is intentionally branded as **Ermine**, designed for the **stoat.chat**
 
 ## Deploying on Vercel
 
-This project includes a `vercel.json` SPA rewrite so deep links resolve correctly to `index.html`.
+This project includes a `vercel.json` SPA rewrite so deep links resolve correctly to `/` (framework entrypoint) on Vercel, which avoids hard-coding an `index.html` file.
 
 For environment-specific endpoints, set these Vercel environment variables:
 
