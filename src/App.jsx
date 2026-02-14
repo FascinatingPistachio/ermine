@@ -297,6 +297,8 @@ function AppShell() {
   const preloadedMembersRef = useRef({});
   const pendingUserFetchRef = useRef(new Set());
   const membersLoadIdRef = useRef(0);
+  const canFetchMissingUsersRef = useRef(true);
+  const loggedMissingUserFetchErrorRef = useRef(false);
 
   const serverList = useMemo(() => Object.values(servers), [servers]);
 
@@ -362,29 +364,43 @@ function AppShell() {
   };
 
   const fetchMissingUsers = async (messageList = []) => {
+    if (!canFetchMissingUsersRef.current) return;
+
     const unresolved = new Set();
 
     messageList.forEach((entry) => {
       const authorId = typeof entry?.author === 'string' ? entry.author : entry?.author?._id;
-      if (!authorId || users[authorId] || pendingUserFetchRef.current.has(authorId)) return;
+      if (!authorId || authorId === '00000000000000000000000000' || users[authorId] || pendingUserFetchRef.current.has(authorId)) return;
       unresolved.add(authorId);
     });
 
     if (!unresolved.size) return;
 
-    unresolved.forEach((id) => pendingUserFetchRef.current.add(id));
+    const MAX_BACKGROUND_USER_FETCHES = 6;
+    const limitedIds = [...unresolved].slice(0, MAX_BACKGROUND_USER_FETCHES);
+    limitedIds.forEach((id) => pendingUserFetchRef.current.add(id));
 
     await Promise.all(
-      [...unresolved].map(async (userId) => {
+      limitedIds.map(async (userId) => {
         try {
-          const res = await fetch(`${config.apiUrl}/users/${userId}`, {
-            headers: { 'x-session-token': auth.token },
-          });
-          if (!res.ok) return;
+          const res = await fetch(`${config.apiUrl}/users/${userId}`);
+          if (!res.ok) {
+            if (res.status === 401 || res.status === 403 || res.status === 405) {
+              canFetchMissingUsersRef.current = false;
+            }
+            return;
+          }
           const data = await res.json();
           if (data?._id) upsertUsers([data]);
-        } catch {
-          // no-op
+        } catch (error) {
+          const message = (error && error.message) || '';
+          if (message.includes('Failed to fetch') || message.includes('CORS')) {
+            canFetchMissingUsersRef.current = false;
+          }
+          if (!loggedMissingUserFetchErrorRef.current) {
+            loggedMissingUserFetchErrorRef.current = true;
+            console.warn('Disabling background user lookup due to network/CORS restrictions.');
+          }
         } finally {
           pendingUserFetchRef.current.delete(userId);
         }
@@ -819,6 +835,8 @@ function AppShell() {
     preloadedMembersRef.current = {};
     pendingUserFetchRef.current = new Set();
     membersLoadIdRef.current = 0;
+    canFetchMissingUsersRef.current = true;
+    loggedMissingUserFetchErrorRef.current = false;
     setIsMembersLoading(false);
     setView('login');
     setStatus('disconnected');
