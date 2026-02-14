@@ -247,7 +247,7 @@ const Message = ({ msg, users, cdnUrl, currentUserId, onReply, onEdit, onDelete,
        <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
              <span className="font-bold text-gray-200 text-sm hover:underline cursor-pointer" onClick={() => onUserClick(user)}>{user.username}</span>
-             <span className="text-[10px] text-gray-500">{formatMessageTime(msg.createdAt)}</span>
+             <span className="text-[10px] text-gray-500">{msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
           </div>
           <div className="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap break-words">
              {renderContent()}
