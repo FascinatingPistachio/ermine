@@ -6,9 +6,11 @@ import {
   LogOut,
   MessageSquare,
   Plus,
+  Reply,
   Send,
   Settings,
   ShieldCheck,
+  Smile,
   User,
   Users,
   X,
@@ -60,6 +62,15 @@ const EMOJI_SHORTCODES = {
   thinking: '🤔',
   tada: '🎉',
   eyes: '👀',
+};
+
+const QUICK_EMOJIS = ['👍', '❤️', '😂', '🔥', '😭', '🎉', '😮', '👀', '🤔'];
+
+const toReactionEntries = (reactions) => {
+  if (!reactions || typeof reactions !== 'object') return [];
+  return Object.entries(reactions)
+    .map(([emoji, userIds]) => ({ emoji, userIds: Array.isArray(userIds) ? userIds : [] }))
+    .filter((entry) => entry.userIds.length > 0);
 };
 
 const renderMessageContent = (content, users, channels, onUserClick) => {
@@ -146,19 +157,31 @@ const Modal = ({ title, onClose, children }) => (
   </div>
 );
 
-const Message = ({ message, users, channels, me, onUserClick, cdnUrl }) => {
+const Message = ({ message, users, channels, me, onUserClick, cdnUrl, onToggleReaction, onReply, replyTarget }) => {
   const authorId = typeof message.author === 'string' ? message.author : message.author?._id;
   const author = users[authorId] || (typeof message.author === 'object' ? message.author : null) || { username: 'Unknown user' };
   const mine = me === authorId;
+  const messageReactions = toReactionEntries(message.reactions);
+  const replyPreview = message.replyMessage;
 
   return (
     <article className="group flex gap-3 rounded px-4 py-2 hover:bg-[#2e3035]">
-      <button className="mt-0.5" onClick={() => onUserClick(author, authorId)}>
+      <button className="mt-0.5" onClick={() => onUserClick(author, authorId)} type="button">
         <Avatar cdnUrl={cdnUrl} user={author} />
       </button>
       <div className="min-w-0 flex-1">
+        {replyPreview ? (
+          <button
+            className="mb-1 flex max-w-full items-center gap-1 text-xs text-gray-400 hover:text-gray-200"
+            onClick={() => onUserClick(replyPreview.authorUser || { username: 'Unknown user' }, replyPreview.authorId)}
+            type="button"
+          >
+            <Reply size={12} />
+            <span className="truncate">Replying to {replyPreview.authorUser?.username || 'Unknown user'}: {replyPreview.content || 'Attachment / embed'}</span>
+          </button>
+        ) : null}
         <div className="flex items-baseline gap-2">
-          <button className="text-sm font-semibold text-white hover:underline" onClick={() => onUserClick(author, authorId)}>
+          <button className="text-sm font-semibold text-white hover:underline" onClick={() => onUserClick(author, authorId)} type="button">
             {author.username}
           </button>
           {mine && <span className="rounded bg-[#5865f2]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[#bdc3ff]">YOU</span>}
@@ -167,6 +190,28 @@ const Message = ({ message, users, channels, me, onUserClick, cdnUrl }) => {
         {message.content ? (
           <p className="whitespace-pre-wrap break-words text-sm text-gray-200">{renderMessageContent(message.content, users, channels, onUserClick)}</p>
         ) : null}
+        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+          {messageReactions.map(({ emoji, userIds }) => {
+            const reacted = userIds.includes(me);
+            return (
+              <button
+                className={`rounded-full border px-2 py-0.5 text-xs ${reacted ? 'border-[#5865f2] bg-[#5865f2]/20 text-[#d7ddff]' : 'border-[#4c4f56] bg-[#2b2d31] text-gray-200 hover:bg-[#35373c]'}`}
+                key={emoji}
+                onClick={() => onToggleReaction(message, emoji, reacted)}
+                type="button"
+              >
+                {emoji} {userIds.length}
+              </button>
+            );
+          })}
+          <button className="rounded-full border border-[#4c4f56] px-2 py-0.5 text-xs text-gray-300 hover:bg-[#35373c]" onClick={() => onReply(message)} type="button">
+            <Reply size={12} className="inline" /> Reply
+          </button>
+          <button className="rounded-full border border-[#4c4f56] px-2 py-0.5 text-xs text-gray-300 hover:bg-[#35373c]" onClick={() => onToggleReaction(message, '👍', message.reactions?.['👍']?.includes(me))} type="button">
+            + React
+          </button>
+          {replyTarget === message._id ? <span className="text-[11px] text-[#bdc3ff]">Reply target</span> : null}
+        </div>
       </div>
     </article>
   );
@@ -192,6 +237,8 @@ export default function App() {
   const [activeModal, setActiveModal] = useState(null);
   const [createServerName, setCreateServerName] = useState('');
   const [peekUser, setPeekUser] = useState(null);
+  const [replyingTo, setReplyingTo] = useState(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
   const [loginMode, setLoginMode] = useState('credentials');
   const [email, setEmail] = useState('');
@@ -215,6 +262,7 @@ export default function App() {
   }, [channels, selectedServerId]);
 
   const currentMessages = useMemo(() => messages[selectedChannelId] || [], [messages, selectedChannelId]);
+  const currentMessageMap = useMemo(() => Object.fromEntries(currentMessages.map((message) => [message._id, message])), [currentMessages]);
 
   const currentMembers = useMemo(() => {
     if (selectedServerId === '@me') return [];
@@ -330,13 +378,14 @@ export default function App() {
         setMessages((prev) => {
           const list = prev[packet.channel] || [];
           if (list.find((m) => m._id === packet._id)) return prev;
-          return { ...prev, [packet.channel]: [...list, packet].slice(-200) };
+          const nextMessages = [...list, packet].slice(-200);
+          return { ...prev, [packet.channel]: enrichReplies(nextMessages) };
         });
         break;
       case 'MessageUpdate':
         setMessages((prev) => ({
           ...prev,
-          [packet.channel]: (prev[packet.channel] || []).map((m) => (m._id === packet.id ? { ...m, ...packet.data } : m)),
+          [packet.channel]: enrichReplies((prev[packet.channel] || []).map((m) => (m._id === packet.id ? { ...m, ...packet.data } : m))),
         }));
         break;
       case 'MessageDelete':
@@ -501,6 +550,24 @@ export default function App() {
     }
   };
 
+  const enrichReplies = (nextMessages) =>
+    nextMessages.map((message) => {
+      const replyId = Array.isArray(message.replies) ? message.replies[0] : null;
+      const replyMessage = replyId ? nextMessages.find((entry) => entry._id === replyId) : null;
+      if (!replyMessage) return message;
+      const replyAuthorId = typeof replyMessage.author === 'string' ? replyMessage.author : replyMessage.author?._id;
+
+      return {
+        ...message,
+        replyMessage: {
+          _id: replyMessage._id,
+          content: replyMessage.content,
+          authorId: replyAuthorId,
+          authorUser: users[replyAuthorId] || (typeof replyMessage.author === 'object' ? replyMessage.author : null),
+        },
+      };
+    });
+
   const fetchMessages = async (channelId) => {
     if (!channelId || channelId === 'friends') return;
 
@@ -524,7 +591,8 @@ export default function App() {
         });
       }
 
-      setMessages((prev) => ({ ...prev, [channelId]: payloadMessages.reverse().slice(-200) }));
+      const orderedMessages = payloadMessages.reverse().slice(-200);
+      setMessages((prev) => ({ ...prev, [channelId]: enrichReplies(orderedMessages) }));
       preloadedChannelRef.current[channelId] = true;
     } catch {
       // no-op
@@ -557,6 +625,8 @@ export default function App() {
 
     if (serverId === '@me') {
       setSelectedChannelId('friends');
+      setReplyingTo(null);
+      setShowEmojiPicker(false);
       return;
     }
 
@@ -568,6 +638,8 @@ export default function App() {
 
   const handleChannelSelect = (channelId) => {
     setSelectedChannelId(channelId);
+    setReplyingTo(null);
+    setShowEmojiPicker(false);
     fetchMessages(channelId);
   };
 
@@ -649,11 +721,55 @@ export default function App() {
           'Content-Type': 'application/json',
           'x-session-token': auth.token,
         },
-        body: JSON.stringify({ content, nonce: crypto.randomUUID() }),
+        body: JSON.stringify({
+          content,
+          nonce: crypto.randomUUID(),
+          replies: replyingTo ? [replyingTo._id] : undefined,
+        }),
       });
+      setReplyingTo(null);
+      setShowEmojiPicker(false);
     } catch {
       setInputText(content);
     }
+  };
+
+
+  const toggleReaction = async (message, emoji, reacted) => {
+    if (!message?._id || !selectedChannelId || selectedChannelId === 'friends') return;
+    const encodedEmoji = encodeURIComponent(emoji);
+
+    setMessages((prev) => {
+      const nextList = (prev[selectedChannelId] || []).map((entry) => {
+        if (entry._id !== message._id) return entry;
+        const existing = entry.reactions?.[emoji] || [];
+        const nextUserIds = reacted ? existing.filter((id) => id !== auth.userId) : [...new Set([...existing, auth.userId])];
+
+        return {
+          ...entry,
+          reactions: {
+            ...(entry.reactions || {}),
+            [emoji]: nextUserIds,
+          },
+        };
+      });
+
+      return { ...prev, [selectedChannelId]: nextList };
+    });
+
+    try {
+      await fetch(`${config.apiUrl}/channels/${selectedChannelId}/messages/${message._id}/reactions/${encodedEmoji}`, {
+        method: reacted ? 'DELETE' : 'PUT',
+        headers: { 'x-session-token': auth.token },
+      });
+    } catch {
+      // no-op, websocket sync should self-heal
+    }
+  };
+
+  const addEmojiToComposer = (emoji) => {
+    setInputText((prev) => `${prev}${emoji}`);
+    setShowEmojiPicker(false);
   };
 
   const createServer = async () => {
@@ -677,6 +793,8 @@ export default function App() {
       // no-op
     }
   };
+
+  const activeReply = replyingTo ? currentMessageMap[replyingTo._id] || replyingTo : null;
 
   const currentChannelName =
     selectedChannelId === 'friends' ? 'friends' : channels[selectedChannelId]?.name || 'select-a-channel';
@@ -871,14 +989,54 @@ export default function App() {
             </div>
           ) : (
             currentMessages.map((message) => (
-              <Message cdnUrl={config.cdnUrl} channels={channels} key={message._id} me={auth.userId} message={message} onUserClick={openUserProfile} users={users} />
+              <Message
+                cdnUrl={config.cdnUrl}
+                channels={channels}
+                key={message._id}
+                me={auth.userId}
+                message={message}
+                onReply={setReplyingTo}
+                onToggleReaction={toggleReaction}
+                onUserClick={openUserProfile}
+                replyTarget={replyingTo?._id}
+                users={users}
+              />
             ))
           )}
           <div ref={messagesBottomRef} />
         </section>
 
         <footer className="border-t border-[#202225] p-4">
+          {activeReply ? (
+            <div className="mb-2 flex items-center justify-between gap-2 rounded-md bg-[#2b2d31] px-3 py-2 text-xs text-gray-300">
+              <span className="truncate">
+                Replying to {users[typeof activeReply.author === 'string' ? activeReply.author : activeReply.author?._id]?.username || 'Unknown user'}: {activeReply.content || 'Attachment / embed'}
+              </span>
+              <button className="rounded p-1 text-gray-400 hover:bg-[#3a3d42] hover:text-white" onClick={() => setReplyingTo(null)} type="button">
+                <X size={13} />
+              </button>
+            </div>
+          ) : null}
           <div className="flex items-center gap-2 rounded-lg bg-[#383a40] p-2">
+            <div className="relative">
+              <button
+                className="rounded p-2 text-gray-300 hover:bg-[#4b4d55] hover:text-white"
+                disabled={selectedChannelId === 'friends'}
+                onClick={() => setShowEmojiPicker((prev) => !prev)}
+                type="button"
+              >
+                <Smile size={16} />
+              </button>
+              {showEmojiPicker && selectedChannelId !== 'friends' ? (
+                <div className="absolute bottom-12 left-0 z-20 grid w-44 grid-cols-3 gap-1 rounded-lg border border-[#4c4f56] bg-[#232428] p-2 shadow-2xl">
+                  {QUICK_EMOJIS.map((emoji) => (
+                    <button className="rounded p-1.5 text-lg hover:bg-[#3a3d42]" key={emoji} onClick={() => addEmojiToComposer(emoji)} type="button">
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
             <input
               className="flex-1 bg-transparent px-2 py-1 text-sm text-gray-100 placeholder:text-gray-400 focus:outline-none"
               disabled={selectedChannelId === 'friends'}
@@ -887,7 +1045,7 @@ export default function App() {
               placeholder={selectedChannelId === 'friends' ? 'Select a text channel to chat.' : `Message #${currentChannelName}`}
               value={inputText}
             />
-            <button className="rounded p-2 text-gray-300 hover:bg-[#4b4d55] hover:text-white" onClick={sendMessage}>
+            <button className="rounded p-2 text-gray-300 hover:bg-[#4b4d55] hover:text-white" onClick={sendMessage} type="button">
               <Send size={16} />
             </button>
           </div>
