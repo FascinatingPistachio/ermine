@@ -289,6 +289,7 @@ function AppShell() {
   const [manualToken, setManualToken] = useState('');
   const [loginError, setLoginError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [wsReconnectAttempt, setWsReconnectAttempt] = useState(0);
 
   const wsRef = useRef(null);
   const messagesBottomRef = useRef(null);
@@ -299,6 +300,7 @@ function AppShell() {
   const membersLoadIdRef = useRef(0);
   const canFetchMissingUsersRef = useRef(true);
   const loggedMissingUserFetchErrorRef = useRef(false);
+  const wsReconnectTimeoutRef = useRef(null);
 
   const serverList = useMemo(() => Object.values(servers), [servers]);
 
@@ -340,6 +342,14 @@ function AppShell() {
     [users],
   );
 
+  const isSameOriginApi = useMemo(() => {
+    try {
+      return new URL(config.apiUrl).origin === window.location.origin;
+    } catch {
+      return false;
+    }
+  }, [config.apiUrl]);
+
   const upsertUsers = (list = []) => {
     if (!list.length) return;
     setUsers((prev) => {
@@ -364,7 +374,7 @@ function AppShell() {
   };
 
   const fetchMissingUsers = async (messageList = []) => {
-    if (!canFetchMissingUsersRef.current) return;
+    if (!canFetchMissingUsersRef.current || !isSameOriginApi) return;
 
     const unresolved = new Set();
 
@@ -383,7 +393,9 @@ function AppShell() {
     await Promise.all(
       limitedIds.map(async (userId) => {
         try {
-          const res = await fetch(`${config.apiUrl}/users/${userId}`);
+          const res = await fetch(`${config.apiUrl}/users/${userId}`, {
+            headers: { 'x-session-token': auth.token },
+          });
           if (!res.ok) {
             if (res.status === 401 || res.status === 403 || res.status === 405) {
               canFetchMissingUsersRef.current = false;
@@ -578,20 +590,31 @@ function AppShell() {
       const parsed = new URL(wsUrl.startsWith('ws') ? wsUrl : `wss://${wsUrl}`);
       parsed.searchParams.set('version', '1');
       parsed.searchParams.set('format', 'json');
+      parsed.searchParams.set('token', auth.token);
       wsUrl = parsed.toString();
     } catch {
-      wsUrl = `${DEFAULT_WS_URL}?version=1&format=json`;
+      wsUrl = `${DEFAULT_WS_URL}?version=1&format=json&token=${encodeURIComponent(auth.token)}`;
     }
 
     setStatus('connecting');
     if (wsRef.current) wsRef.current.close();
+    if (wsReconnectTimeoutRef.current) {
+      clearTimeout(wsReconnectTimeoutRef.current);
+      wsReconnectTimeoutRef.current = null;
+    }
 
+    let isUnmounting = false;
     const socket = new WebSocket(wsUrl);
     wsRef.current = socket;
 
-    socket.onopen = () => socket.send(JSON.stringify({ type: 'Authenticate', token: auth.token }));
     socket.onerror = () => setStatus('error');
-    socket.onclose = () => setStatus((prev) => (prev === 'error' ? prev : 'disconnected'));
+    socket.onclose = () => {
+      setStatus((prev) => (prev === 'error' ? prev : 'disconnected'));
+      if (isUnmounting || view !== 'app') return;
+      wsReconnectTimeoutRef.current = setTimeout(() => {
+        setWsReconnectAttempt((value) => value + 1);
+      }, 2500);
+    };
 
     socket.onmessage = (event) => applyEvent(JSON.parse(event.data));
 
@@ -600,10 +623,15 @@ function AppShell() {
     }, 20000);
 
     return () => {
+      isUnmounting = true;
       clearInterval(heartbeat);
+      if (wsReconnectTimeoutRef.current) {
+        clearTimeout(wsReconnectTimeoutRef.current);
+        wsReconnectTimeoutRef.current = null;
+      }
       socket.close();
     };
-  }, [auth.token, config.wsUrl, view]);
+  }, [auth.token, config.wsUrl, view, wsReconnectAttempt]);
 
   useEffect(() => {
     const socket = wsRef.current;
@@ -838,6 +866,11 @@ function AppShell() {
     canFetchMissingUsersRef.current = true;
     loggedMissingUserFetchErrorRef.current = false;
     setIsMembersLoading(false);
+    setWsReconnectAttempt(0);
+    if (wsReconnectTimeoutRef.current) {
+      clearTimeout(wsReconnectTimeoutRef.current);
+      wsReconnectTimeoutRef.current = null;
+    }
     setView('login');
     setStatus('disconnected');
   };
