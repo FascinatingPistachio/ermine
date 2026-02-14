@@ -65,6 +65,8 @@ const EMOJI_SHORTCODES = {
 };
 
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '🔥', '😭', '🎉', '😮', '👀', '🤔'];
+const MEMBER_RENDER_LIMIT = 250;
+const MEMBER_HYDRATE_CHUNK = 400;
 
 const toReactionEntries = (reactions) => {
   if (!reactions || typeof reactions !== 'object') return [];
@@ -276,6 +278,7 @@ function AppShell() {
   const [activeModal, setActiveModal] = useState(null);
   const [createServerName, setCreateServerName] = useState('');
   const [peekUser, setPeekUser] = useState(null);
+  const [isMembersLoading, setIsMembersLoading] = useState(false);
   const [replyingTo, setReplyingTo] = useState(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
@@ -293,6 +296,7 @@ function AppShell() {
   const preloadedChannelRef = useRef({});
   const preloadedMembersRef = useRef({});
   const pendingUserFetchRef = useRef(new Set());
+  const membersLoadIdRef = useRef(0);
 
   const serverList = useMemo(() => Object.values(servers), [servers]);
 
@@ -304,14 +308,20 @@ function AppShell() {
   const currentMessages = useMemo(() => messages[selectedChannelId] || [], [messages, selectedChannelId]);
   const currentMessageMap = useMemo(() => Object.fromEntries(currentMessages.map((message) => [message._id, message])), [currentMessages]);
 
-  const currentMembers = useMemo(() => {
+  const allCurrentMembers = useMemo(() => {
     if (selectedServerId === '@me') return [];
     return Object.values(members)
-      .filter((m) => m._id.server === selectedServerId)
-      .map((m) => ({ ...m, user: users[m._id.user] }))
-      .filter((m) => Boolean(m.user))
-      .sort((a, b) => a.user.username.localeCompare(b.user.username));
+      .filter((member) => member._id.server === selectedServerId)
+      .map((member) => ({ ...member, user: users[member._id.user] }))
+      .filter((member) => Boolean(member.user));
   }, [members, selectedServerId, users]);
+
+  const currentMembers = useMemo(
+    () => allCurrentMembers.slice(0, MEMBER_RENDER_LIMIT).sort((a, b) => (a.nickname || a.user.username).localeCompare(b.nickname || b.user.username)),
+    [allCurrentMembers],
+  );
+
+  const hiddenMembersCount = Math.max(0, allCurrentMembers.length - currentMembers.length);
 
   const openUserProfile = (user, fallbackId = null) => {
     const stableId = user?._id || fallbackId || 'unknown-user';
@@ -614,6 +624,10 @@ function AppShell() {
   const fetchMembers = async (serverId) => {
     if (serverId === '@me') return;
 
+    const loadId = Date.now();
+    membersLoadIdRef.current = loadId;
+    setIsMembersLoading(true);
+
     try {
       const res = await fetch(`${config.apiUrl}/servers/${serverId}/members`, {
         headers: { 'x-session-token': auth.token },
@@ -621,22 +635,31 @@ function AppShell() {
       if (!res.ok) return;
       const data = await res.json();
 
-      setUsers((prev) => {
-        const next = { ...prev };
-        data.users?.forEach((u) => {
-          next[u._id] = u;
+      upsertUsers(data.users || []);
+      const payloadMembers = data.members || [];
+
+      for (let index = 0; index < payloadMembers.length; index += MEMBER_HYDRATE_CHUNK) {
+        if (membersLoadIdRef.current !== loadId) break;
+        const chunk = payloadMembers.slice(index, index + MEMBER_HYDRATE_CHUNK);
+
+        setMembers((prev) => {
+          const next = { ...prev };
+          chunk.forEach((member) => {
+            next[`${member._id.server}:${member._id.user}`] = member;
+          });
+          return next;
         });
-        return next;
-      });
-      setMembers((prev) => {
-        const next = { ...prev };
-        data.members?.forEach((m) => {
-          next[`${m._id.server}:${m._id.user}`] = m;
-        });
-        return next;
-      });
+
+        if (index + MEMBER_HYDRATE_CHUNK < payloadMembers.length) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+      }
     } catch {
       // no-op
+    } finally {
+      if (membersLoadIdRef.current === loadId) {
+        setIsMembersLoading(false);
+      }
     }
   };
 
@@ -705,12 +728,7 @@ function AppShell() {
       }, index * 350);
     });
 
-    Object.values(servers).forEach((server) => {
-      if (!server?._id || preloadedMembersRef.current[server._id]) return;
-      preloadedMembersRef.current[server._id] = true;
-      fetchMembers(server._id);
-    });
-  }, [status, auth.token, channels, servers]);
+  }, [status, auth.token, channels]);
 
   const handleServerSelect = (serverId) => {
     setSelectedServerId(serverId);
@@ -725,7 +743,10 @@ function AppShell() {
     const firstChannel = Object.values(channels).find((ch) => ch.server === serverId);
     setSelectedChannelId(firstChannel?._id || null);
     if (firstChannel?._id) fetchMessages(firstChannel._id);
-    fetchMembers(serverId);
+    if (!preloadedMembersRef.current[serverId]) {
+      preloadedMembersRef.current[serverId] = true;
+      void fetchMembers(serverId);
+    }
   };
 
   const handleChannelSelect = (channelId) => {
@@ -797,6 +818,8 @@ function AppShell() {
     preloadedChannelRef.current = {};
     preloadedMembersRef.current = {};
     pendingUserFetchRef.current = new Set();
+    membersLoadIdRef.current = 0;
+    setIsMembersLoading(false);
     setView('login');
     setStatus('disconnected');
   };
@@ -1146,8 +1169,11 @@ function AppShell() {
       </main>
 
       <aside className="hidden w-60 flex-col border-l border-[#202225] bg-[#2b2d31] lg:flex">
-        <div className="border-b border-[#202225] px-4 py-3 text-xs font-bold uppercase tracking-wide text-gray-400">Members — {currentMembers.length}</div>
+        <div className="border-b border-[#202225] px-4 py-3 text-xs font-bold uppercase tracking-wide text-gray-400">
+          Members — {allCurrentMembers.length}{isMembersLoading ? ' (loading...)' : ''}
+        </div>
         <div className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
+          {hiddenMembersCount > 0 ? <p className="px-2 py-1 text-[11px] text-gray-500">Showing first {currentMembers.length} members for responsiveness.</p> : null}
           {currentMembers.map((member) => (
             <button className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-[#35373c]" key={member._id.user} onClick={() => openUserProfile(member.user, member._id.user)}>
               <Avatar cdnUrl={config.cdnUrl} size="sm" user={member.user} />
