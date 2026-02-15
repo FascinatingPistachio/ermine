@@ -22,7 +22,8 @@ import {
   Edit2,
   Save,
   MoreVertical,
-  Search
+  Search,
+  Image as ImageIcon
 } from 'lucide-react';
 
 // --- ULID Decoder for Timestamps ---
@@ -346,7 +347,12 @@ const renderEmojiVisual = (token, customEmoji, cdnUrl) => {
   return token;
 };
 
-const isImageLike = (filename = '', contentType = '') => (typeof contentType === 'string' && contentType.startsWith('image/')) || /\.(png|jpe?g|webp|gif|bmp|avif|svg)$/i.test(filename || '');
+const isImageLike = (filename = '', contentType = '') => {
+    if (typeof contentType === 'string' && contentType.startsWith('image/')) return true;
+    const ext = filename?.split('.').pop()?.toLowerCase();
+    return ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'avif', 'svg'].includes(ext);
+};
+
 const getAttachmentData = (attachment, cdnUrl, index = 0) => {
   const attachmentId = typeof attachment === 'string' ? attachment : attachment?._id || attachment?.id;
   const filename = attachment?.filename || attachment?.name || `attachment-${index + 1}`;
@@ -358,6 +364,13 @@ const getAttachmentData = (attachment, cdnUrl, index = 0) => {
 
 const extractUrls = (value = '') => (value.match(/https?:\/\/[^\s]+/gi) || []);
 const isEmbeddableGifLink = (url) => url && (/^https?:\/\/media\.tenor\.com\//i.test(url) || /\.(gif)(\?.*)?$/i.test(url));
+
+const isEmbeddableImageLink = (url) => {
+    if (!url) return false;
+    const cleanUrl = url.split('?')[0].toLowerCase();
+    return /\.(png|jpe?g|webp|gif|bmp|avif|svg)$/i.test(cleanUrl);
+};
+
 
 const renderMessageContent = (content, users, channels, onUserClick, customEmojiById, cdnUrl, onRequestOpenLink) => {
   if (!content) return null;
@@ -371,15 +384,20 @@ const renderMessageContent = (content, users, channels, onUserClick, customEmoji
     }
     const channelMention = part.match(/^<#([A-Za-z0-9]+)>$/);
     if (channelMention) return <span className="mx-0.5 inline rounded bg-[#3f4249] px-1 text-gray-100" key={`${part}-${index}`}>#{channels[channelMention[1]]?.name || 'unknown-channel'}</span>;
+    
+    // Check for Custom Emoji Token :ID:
     if (isCustomEmojiToken(part)) {
         const customEmoji = resolveCustomEmojiMeta(part, customEmojiById);
         return <span className="mx-0.5 inline-flex items-center" key={`${part}-${index}`} title={`${customEmoji?.name || part}`}>{renderEmojiVisual(part, customEmoji, cdnUrl)}</span>;
     }
+    
+    // Check for Shortcodes
     const shortcodeMatch = part.match(/^:([a-z0-9_+-]+):$/i);
     if (shortcodeMatch) {
        const mapped = EMOJI_SHORTCODES[shortcodeMatch[1].toLowerCase()];
        if (mapped) return renderTwemoji(mapped);
     }
+    
     const textElement = renderMarkdownInline(part, `md-${index}`, onRequestOpenLink);
     return typeof textElement === 'string' ? <React.Fragment key={`${part}-${index}`}>{renderTwemoji(textElement)}</React.Fragment> : <React.Fragment key={`${part}-${index}`}>{textElement}</React.Fragment>;
   });
@@ -465,8 +483,10 @@ const Message = memo(({
   
   const [showReactionPicker, setShowReactionPicker] = useState(false);
   const [isMessageHovered, setIsMessageHovered] = useState(false);
-  const embeddedGifUrls = useMemo(() => extractUrls(message.content || '').filter(isEmbeddableGifLink), [message.content]);
-  const [resolvedGifUrls, setResolvedGifUrls] = useState({});
+  
+  const embeddedLinks = useMemo(() => extractUrls(message.content || ''), [message.content]);
+  const [resolvedImages, setResolvedImages] = useState([]);
+  
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState('');
   
@@ -483,28 +503,32 @@ const Message = memo(({
 
   useEffect(() => {
     let cancelled = false;
-    const resolveTenorUrls = async () => {
-      const tenorLinks = embeddedGifUrls.filter((url) => /^https?:\/\/tenor\.com\//i.test(url));
-      if (!tenorLinks.length) return;
-      const results = await Promise.all(tenorLinks.map(async (url) => {
-        try {
-          const response = await fetch(`https://tenor.com/oembed?url=${encodeURIComponent(url)}`);
-          if (!response.ok) return [url, url];
-          const data = await response.json();
-          return [url, data?.url || data?.thumbnail_url || url];
-        } catch { return [url, url]; }
+    const resolve = async () => {
+      const results = await Promise.all(embeddedLinks.map(async (url) => {
+         if (/^https?:\/\/media\.tenor\.com\//i.test(url)) {
+             try {
+               const response = await fetch(`https://tenor.com/oembed?url=${encodeURIComponent(url)}`);
+               if (!response.ok) return { url, type: 'image', src: url }; 
+               const data = await response.json();
+               return { url, type: 'image', src: data?.url || data?.thumbnail_url || url };
+             } catch { return { url, type: 'image', src: url }; }
+         }
+         if (isEmbeddableImageLink(url)) {
+             return { url, type: 'image', src: url };
+         }
+         return null;
       }));
-      if (!cancelled) setResolvedGifUrls((prev) => ({ ...prev, ...Object.fromEntries(results) }));
+      const validResults = results.filter(Boolean);
+      if (!cancelled) setResolvedImages(validResults);
     };
-    void resolveTenorUrls();
+    if(embeddedLinks.length > 0) resolve(); else setResolvedImages([]);
     return () => { cancelled = true; };
-  }, [embeddedGifUrls]);
+  }, [embeddedLinks]);
 
-  const contentWithoutEmbeddedGifLinks = useMemo(() => {
+  const contentWithoutLinks = useMemo(() => {
     let next = message.content || '';
-    embeddedGifUrls.forEach((url) => { next = next.split(url).join(''); });
     return next.trim();
-  }, [embeddedGifUrls, message.content]);
+  }, [message.content]);
   
   const startEditing = () => { setEditContent(message.content || ''); setIsEditing(true); setShowReactionPicker(false); };
   const saveEdit = () => { if (editContent.trim() !== message.content) onEditMessage(message._id, editContent); setIsEditing(false); };
@@ -552,28 +576,31 @@ const Message = memo(({
           </div>
         ) : (
           <>
-            {contentWithoutEmbeddedGifLinks ? <p className="whitespace-pre-wrap break-words text-sm text-gray-200">{renderMessageContent(contentWithoutEmbeddedGifLinks, users, channels, onUserClick, customEmojiById, cdnUrl, onRequestOpenLink)}</p> : null}
+             {contentWithoutLinks ? <p className="whitespace-pre-wrap break-words text-sm text-gray-200">{renderMessageContent(contentWithoutLinks, users, channels, onUserClick, customEmojiById, cdnUrl, onRequestOpenLink)}</p> : null}
           </>
         )}
 
-        {embeddedGifUrls.length ? (
+        {resolvedImages.length > 0 && (
           <div className="mt-1.5 flex flex-wrap gap-2">
-            {embeddedGifUrls.slice(0, 3).map((url, idx) => {
-              const renderUrl = resolvedGifUrls[url] || url;
-              return <button className="block overflow-hidden rounded border border-[#3a3d42]" key={`${url}-${idx}`} onClick={() => onRequestOpenLink(url)} title={url} type="button"><img alt="Embedded GIF" className="max-h-52 max-w-[320px] object-contain" src={renderUrl} /></button>;
-            })}
+            {resolvedImages.map((img, idx) => (
+              <button className="block overflow-hidden rounded-lg border border-[#2f3237]" key={`${img.url}-${idx}`} onClick={() => onRequestOpenLink(img.url)} title={img.url} type="button">
+                <img alt="Embed" className="max-h-64 max-w-full object-contain" src={img.src} loading="lazy" />
+              </button>
+            ))}
           </div>
-        ) : null}
-        {Array.isArray(message.attachments) && message.attachments.length ? (
+        )}
+        
+        {Array.isArray(message.attachments) && message.attachments.length > 0 && (
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             {message.attachments.map((attachment, index) => {
               const { attachmentId, filename, url, image } = getAttachmentData(attachment, cdnUrl, index);
               if (!attachmentId || !url) return null;
-              if (image) return <a className="block overflow-hidden rounded border border-[#3a3d42]" href={url} key={attachmentId} rel="noreferrer" target="_blank" title={filename}><img alt={filename} className="max-h-52 max-w-[320px] object-contain" src={url} /></a>;
+              if (image) return <a className="block overflow-hidden rounded border border-[#3a3d42]" href={url} key={attachmentId} rel="noreferrer" target="_blank" title={filename}><img alt={filename} className="max-h-64 max-w-full object-contain" src={url} /></a>;
               return <a className="rounded bg-[#232428] px-2 py-1 text-xs text-[#bdc3ff] hover:bg-[#2f3136]" href={url} key={attachmentId} rel="noreferrer" target="_blank">📎 {filename}</a>;
             })}
           </div>
-        ) : null}
+        )}
+        
         <div className="mt-1 flex flex-wrap items-center gap-1.5">
           {messageReactions.map(({ emoji, userIds }) => {
             const reacted = userIds.includes(me);
@@ -710,6 +737,17 @@ function AppShell() {
   const fileInputRef = useRef(null);
   const autoFollowRef = useRef(true);
   const isProgrammaticScrollRef = useRef(false);
+  
+  const pickerRef = useRef(null);
+
+  useEffect(() => {
+     if (!showEmojiPicker) return;
+     const handleClickOutside = (event) => {
+        if (pickerRef.current && !pickerRef.current.contains(event.target)) setShowEmojiPicker(false);
+     };
+     document.addEventListener('mousedown', handleClickOutside);
+     return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showEmojiPicker]);
 
   // --- Helper Functions in Scope ---
   const isSameOriginApi = useMemo(() => { try { return new URL(config.apiUrl).origin === window.location.origin; } catch { return false; } }, [config.apiUrl]);
@@ -820,20 +858,33 @@ function AppShell() {
     } catch {}
   }, [auth.token, config.apiUrl, upsertUsersFromMessages]);
 
-  const fetchMessages = useCallback(async (channelId) => {
+  const fetchMessages = useCallback(async (channelId, beforeId = null) => {
     if (!channelId || channelId === 'friends') return;
     try {
-      const res = await fetch(`${config.apiUrl}/channels/${channelId}/messages?limit=100`, { headers: { 'x-session-token': auth.token } });
+      const url = `${config.apiUrl}/channels/${channelId}/messages?limit=100${beforeId ? `&before=${beforeId}` : ''}`;
+      const res = await fetch(url, { headers: { 'x-session-token': auth.token } });
       if (!res.ok) return;
       const data = await res.json();
       const payloadMessages = Array.isArray(data) ? data : data.messages || [];
       const payloadUsers = Array.isArray(data) ? [] : data.users || [];
       if (payloadUsers.length) upsertUsers(payloadUsers);
       upsertUsersFromMessages(payloadMessages);
-      const orderedMessages = payloadMessages.reverse().slice(-200);
-      setMessages((prev) => ({ ...prev, [channelId]: uniqueMessages(orderedMessages) }));
+      
+      const orderedMessages = payloadMessages.reverse();
+      
+      setMessages((prev) => {
+          const existing = prev[channelId] || [];
+          if (beforeId) {
+             // Merging older messages
+             return { ...prev, [channelId]: uniqueMessages([...orderedMessages, ...existing]) };
+          } else {
+             // Initial load or new load
+             return { ...prev, [channelId]: uniqueMessages(orderedMessages) };
+          }
+      });
+      
       void fetchMissingUsers(orderedMessages);
-      preloadedChannelRef.current[channelId] = true;
+      if (!beforeId) preloadedChannelRef.current[channelId] = true;
     } catch {}
   }, [auth.token, config.apiUrl, upsertUsers, upsertUsersFromMessages, fetchMissingUsers]);
 
@@ -1130,7 +1181,7 @@ function AppShell() {
               <div className="flex flex-col items-center">
                  <div className="w-full h-24 rounded-t-lg bg-gray-700 overflow-hidden relative">
                     {getBannerUrl(users[auth.userId], config.cdnUrl) ? (
-                       <img src={getBannerUrl(users[auth.userId], config.cdnUrl)} alt="Banner" className="w-full h-full object-cover" />
+                       <img src={getBannerUrl(users[auth.userId], config.cdnUrl)} alt="Banner" className="w-full h-full object-cover rounded-t-lg" />
                     ) : (
                        <div className="w-full h-full bg-gradient-to-r from-[#3b3f6b] to-[#5865f2]" />
                     )}
