@@ -104,8 +104,22 @@ const getRuntimeConfig = () => {
 
 const { apiUrl: DEFAULT_API_URL, wsUrl: DEFAULT_WS_URL, cdnUrl: DEFAULT_CDN_URL } = getRuntimeConfig();
 
-const inputBase =
-  'w-full rounded-md border border-[#202225] bg-[#111214] px-3 py-2 text-sm text-gray-100 placeholder:text-gray-500 focus:border-[#5865f2] focus:outline-none focus:ring-1 focus:ring-[#5865f2]';
+// Ermine Core Brand Palette
+const COLORS = {
+  bg: '#0F1115', // Deep Carbon
+  surface: '#171A21', // Steel Surface
+  hover: '#1D212A', // Soft Lift
+  border: '#242A35', // Subtle Line
+  input: '#141821', // Muted Panel
+  accent: '#9FC3E8', // Frost Blue
+  active: '#8AB4F8', // Cold Signal
+  textPrimary: '#E6EDF3', // Near White
+  textSecondary: '#A6B0C3', // Muted Steel
+  success: '#4ADE80', // Winter Green
+  danger: '#FF5F5F', // Clean Red
+};
+
+const inputBase = `w-full rounded-md border border-[${COLORS.border}] bg-[${COLORS.input}] px-3 py-2 text-sm text-[${COLORS.textPrimary}] placeholder:text-[${COLORS.textSecondary}] focus:border-[${COLORS.accent}] focus:outline-none focus:ring-1 focus:ring-[${COLORS.accent}]`;
 
 const TOKEN_COOKIE_NAME = 'ermine_session_token';
 const USER_COOKIE_NAME = 'ermine_user_id';
@@ -128,11 +142,11 @@ const clearCookie = (name) => {
 };
 
 const STATUS_OPTIONS = [
-  { value: 'Online', label: 'Online', icon: Circle, iconClass: 'text-[#3ba55d]' }, // Swapped Activity for Circle
+  { value: 'Online', label: 'Online', icon: Circle, iconClass: `text-[${COLORS.success}]` },
   { value: 'Idle', label: 'Idle', icon: Moon, iconClass: 'text-[#f0b232]' },
-  { value: 'Busy', label: 'Do Not Disturb', icon: MinusCircle, iconClass: 'text-[#ed4245]' },
-  { value: 'Focus', label: 'Focus', icon: Circle, iconClass: 'text-[#4f7dff]' },
-  { value: 'Invisible', label: 'Invisible', icon: EyeOff, iconClass: 'text-gray-400' },
+  { value: 'Busy', label: 'Do Not Disturb', icon: MinusCircle, iconClass: `text-[${COLORS.danger}]` },
+  { value: 'Focus', label: 'Focus', icon: Circle, iconClass: `text-[${COLORS.active}]` },
+  { value: 'Invisible', label: 'Invisible', icon: EyeOff, iconClass: `text-[${COLORS.textSecondary}]` },
 ];
 
 const formatSmartTime = (valueOrId) => {
@@ -183,17 +197,21 @@ const Avatar = ({ user, cdnUrl, size = 'md', animateOnHover = false, alwaysAnima
     return effectiveAnimate ? `${cdnUrl}/avatars/${user.avatar._id}/original` : `${cdnUrl}/avatars/${user.avatar._id}`;
   })();
 
+  // Fallback to non-animated if error occurs or not animating
+  const fallbackSrc = user?.avatar?._id ? `${cdnUrl}/avatars/${user.avatar._id}` : null;
+  const displaySrc = hasError ? fallbackSrc : src;
+
   return (
     <div
-      className={`grid shrink-0 place-items-center overflow-hidden rounded-full bg-[#313338] font-semibold text-gray-200 ${sizeMap[size]}`}
+      className={`grid shrink-0 place-items-center overflow-hidden rounded-full bg-[${COLORS.surface}] font-semibold text-[${COLORS.textPrimary}] ${sizeMap[size]}`}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      {src ? (
+      {displaySrc ? (
         <img 
           alt={user?.username || 'User avatar'} 
           className="block h-full w-full object-cover object-center" 
-          src={src} 
+          src={displaySrc} 
           onError={() => { if(effectiveAnimate) setHasError(true); }}
         />
       ) : initials}
@@ -211,11 +229,11 @@ class AppErrorBoundary extends Component {
   render() {
     if (this.state.hasError) {
       return (
-        <div className="grid min-h-screen place-items-center bg-[#1e1f22] p-6 text-gray-100">
-          <div className="w-full max-w-lg rounded-2xl border border-[#202225] bg-[#2b2d31] p-8 text-center shadow-2xl">
+        <div className={`grid min-h-screen place-items-center bg-[${COLORS.bg}] p-6 text-[${COLORS.textPrimary}]`}>
+          <div className={`w-full max-w-lg rounded-2xl border border-[${COLORS.border}] bg-[${COLORS.surface}] p-8 text-center shadow-2xl`}>
             <h1 className="mt-3 text-2xl font-bold text-white">Looks like Ermine crashed.</h1>
-            <p className="mt-2 text-sm text-gray-300">Try reloading the app.</p>
-            <button className="mt-6 rounded-md bg-[#5865f2] px-4 py-2 text-sm font-semibold text-white hover:bg-[#4956d8]" onClick={() => window.location.reload()} type="button">Reload Ermine</button>
+            <p className={`mt-2 text-sm text-[${COLORS.textSecondary}]`}>Try reloading the app.</p>
+            <button className={`mt-6 rounded-md bg-[${COLORS.accent}] px-4 py-2 text-sm font-semibold text-[${COLORS.bg}] hover:bg-[${COLORS.active}]`} onClick={() => window.location.reload()} type="button">Reload Ermine</button>
           </div>
         </div>
       );
@@ -226,10 +244,10 @@ class AppErrorBoundary extends Component {
 
 const Modal = ({ title, onClose, children }) => (
   <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm overflow-y-auto">
-    <div className="w-full max-w-lg m-auto rounded-xl border border-[#202225] bg-[#2b2d31] shadow-2xl flex flex-col max-h-[85vh]">
-      <div className="flex shrink-0 items-center justify-between border-b border-[#202225] px-4 py-3">
-        <h3 className="text-sm font-bold text-white">{title}</h3>
-        <button className="rounded p-1 text-gray-400 hover:bg-[#3a3d42] hover:text-white" onClick={onClose}><X size={16} /></button>
+    <div className={`w-full max-w-lg m-auto rounded-xl border border-[${COLORS.border}] bg-[${COLORS.surface}] shadow-2xl flex flex-col max-h-[85vh]`}>
+      <div className={`flex shrink-0 items-center justify-between border-b border-[${COLORS.border}] px-4 py-3`}>
+        <h3 className={`text-sm font-bold text-[${COLORS.textPrimary}]`}>{title}</h3>
+        <button className={`rounded p-1 text-[${COLORS.textSecondary}] hover:bg-[${COLORS.hover}] hover:text-[${COLORS.textPrimary}]`} onClick={onClose}><X size={16} /></button>
       </div>
       <div className="p-4 overflow-y-auto custom-scrollbar">{children}</div>
     </div>
@@ -282,7 +300,7 @@ const VirtualList = ({ items, renderItem, itemHeight, className }) => {
 };
 
 // --- Logic Helpers ---
-const LinkAnchor = ({ href, children, onRequestOpenLink, className = 'text-[#8ea1ff] underline hover:text-[#bdc3ff]' }) => (
+const LinkAnchor = ({ href, children, onRequestOpenLink, className = `text-[${COLORS.accent}] underline hover:text-[${COLORS.active}]` }) => (
   <a className={className} href={href} onClick={(e) => { e.preventDefault(); if (onRequestOpenLink) onRequestOpenLink(href); }} rel="noreferrer" target="_blank">{children}</a>
 );
 
@@ -298,7 +316,7 @@ const renderMarkdownInline = (text, keyPrefix = 'md', onRequestOpenLink = null) 
   if (!text) return null;
   const tokens = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|__[^_]+__|~~[^~]+~~|\[[^\]]+\]\([^\)]+\))/g);
   return tokens.map((token, index) => {
-    if (/^`[^`]+`$/.test(token)) return <code key={`${keyPrefix}-${index}`} className="rounded bg-[#232428] px-1 py-0.5 text-xs text-[#f2f3f5]">{token.slice(1, -1)}</code>;
+    if (/^`[^`]+`$/.test(token)) return <code key={`${keyPrefix}-${index}`} className={`rounded bg-[${COLORS.hover}] px-1 py-0.5 text-xs text-[${COLORS.textPrimary}]`}>{token.slice(1, -1)}</code>;
     if (/^\*\*[^*]+\*\*$/.test(token)) return <strong key={`${keyPrefix}-${index}`}>{token.slice(2, -2)}</strong>;
     if (/^\*[^*]+\*$/.test(token)) return <em key={`${keyPrefix}-${index}`}>{token.slice(1, -1)}</em>;
     if (/^__[^_]+__$/.test(token)) return <span key={`${keyPrefix}-${index}`} className="underline">{token.slice(2, -2)}</span>;
@@ -310,13 +328,12 @@ const renderMarkdownInline = (text, keyPrefix = 'md', onRequestOpenLink = null) 
 };
 
 const EMOJI_SHORTCODES = { smile: '😄', grin: '😁', joy: '😂', rofl: '🤣', wink: '😉', heart: '❤️', thumbs_up: '👍', thumbs_down: '👎', fire: '🔥', sob: '😭', thinking: '🤔', tada: '🎉', eyes: '👀' };
-const QUICK_EMOJIS = ['👍', '❤️', '😂', '🔥', '😭', '🎉', '😮', '👀', '🤔'];
-const EXTENDED_EMOJIS = [...QUICK_EMOJIS, '😄', '😁', '🤣', '😉', '🙏', '👏', '✨', '🎯', '💯', '🤝', '😅', '😎', '🥳', '✅', '❌', '🎵', '📌', '🚀', '🫡', '🤌'];
 const STANDARD_EMOJIS = [
   '😀','😃','😄','😁','😆','😅','🤣','😂','🙂','🙃','😉','😊','😇','🥰','😍','🤩','😘','😗','😚','😙','🥲','😋','😛','😜','🤪','😝','🤑','🤗','🤭','🫢','🫣','🤫','🤔','🫡','🤐','🤨','😐','😑','😶','🫥','😏','😒','🙄','😬','🤥','😌','😔','😪','🤤','😴','😷','🤒','🤕','🤢','🤮','🤧','🥵','🥶','🥴','😵','😵‍💫','🤯','🤠','🥳','🥸','😎','🤓','🧐','😕','😟','🙁','☹️','😮','😯','😲','😳','🥺','🥹','😦','😧','😨','😰','😥','😢','😭','😱','😖','😣','😞','😓','😩','😫','🥱','😤','😡','😠','🤬','😈','👿','💀','☠️','💩','🤡','👹','👺','👻','👽','👾','🤖','😺','😸','😹','😻','😼','😽','🙀','😿','😾',
   '👋','🤚','🖐','✋','🖖','👌','🤌','🤏','✌️','🤞','🫰','🤟','🤘','🤙','👈','👉','👆','🖕','👇','☝️','👍','👎','✊','👊','🤛','🤜','👏','🙌','🫶','👐','🤲','🤝','🙏','✍️','💅','🤳','💪','🦾','🦿','🦵','🦶','👂','🦻','👃','🧠','🫀','🫁','🦷','🦴','👀','👁','👅','👄','🫦','💋','👶','🧒','👦','👧','🧑','👱','👨','🧔','👩','🧓','👴','👵',
-  '🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐻‍❄️','🐨','🐯','🦁','🐮','🐷','🐽','🐸','🐵','🙈','🙉','🙊','🐒','🐔','🐧','🐦','🐤','🐣','🐥','🦆','🦅','🦉','🦇','🐺','🐗','🐴','🦄','🐝','🪱','🐛','🦋','🐌','🐞','🐜','🪰','🪲','🪳','🦟','🦗','🕷','🕸','🦂','🐢','🐍','🦎','🦖','🦕','🐙','🦑','🦐','🦞','🦀','🐡','🐠','🐟','🐬','🐳','🐋','🦈','🦭','🐊','🐅','🐆','🦓','🦍','🦧','🦣','🐘','🦛','🦏','🐪','🐫','🦒','🦘','🦬','🐃','🐂','🐄','🐎','🐖','🐏','🐑','🦙','🐐','🦌','🐕','🐩','🦮','🐕‍🦺','🐈','🐈‍⬛','🪶','🐓','🦃','🦤','🦚','🦜','🦢','🦩','🕊','🐇','🦝','🦨','🦡','🦫','🦦','🦥','🐁','🐀','🐿','🦔'
+  '🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐻‍❄️','🐨','🐯','🦁','🐮','🐷','🐽','🐸','🐵','🐵','🙈','🙉','🙊','🐒','🐔','🐧','🐦','🐤','🐣','🐥','🦆','🦅','🦉','🦇','🐺','🐗','🐴','🦄','🐝','🪱','🐛','🦋','🐌','🐞','🐜','🪰','🪲','🪳','🦟','🦗','🕷','🕸','🦂','🐢','🐍','🦎','🦖','🦕','🐙','🦑','🦐','🦞','🦀','🐡','🐠','🐟','🐬','🐳','🐋','🦈','🦭','🐊','🐅','🐆','🦓','🦍','🦧','🦣','🐘','🦛','🦏','🐪','🐫','🦒','🦘','🦬','🐃','🐂','🐄','🐎','🐖','🐏','🐑','🦙','🐐','🦌','🐕','🐩','🦮','🐕‍🦺','🐈','🐈‍⬛','🪶','🐓','🦃','🦤','🦚','🦜','🦢','🦩','🕊','🐇','🦝','🦨','🦡','🦫','🦦','🦥','🐁','🐀','🐿','🦔'
 ];
+const EXTENDED_EMOJIS = [...STANDARD_EMOJIS.slice(0, 50)]; 
 const MEMBER_RENDER_LIMIT = 250;
 const MEMBER_HYDRATE_CHUNK = 400;
 
@@ -380,10 +397,10 @@ const renderMessageContent = (content, users, channels, onUserClick, customEmoji
     if (userMention) {
       const userId = userMention[1];
       const user = users[userId];
-      return <button className="mx-0.5 inline rounded bg-[#5865f2]/25 px-1 text-[#bdc3ff] hover:bg-[#5865f2]/35" key={`${part}-${index}`} onClick={() => onUserClick(user || { _id: userId, username: 'Unknown user' }, userId)}>@{user?.username || 'unknown'}</button>;
+      return <button className={`mx-0.5 inline rounded bg-[${COLORS.accent}]/25 px-1 text-[${COLORS.accent}] hover:bg-[${COLORS.accent}]/35`} key={`${part}-${index}`} onClick={() => onUserClick(user || { _id: userId, username: 'Unknown user' }, userId)}>@{user?.username || 'unknown'}</button>;
     }
     const channelMention = part.match(/^<#([A-Za-z0-9]+)>$/);
-    if (channelMention) return <span className="mx-0.5 inline rounded bg-[#3f4249] px-1 text-gray-100" key={`${part}-${index}`}>#{channels[channelMention[1]]?.name || 'unknown-channel'}</span>;
+    if (channelMention) return <span className={`mx-0.5 inline rounded bg-[${COLORS.hover}] px-1 text-[${COLORS.textPrimary}]`} key={`${part}-${index}`}>#{channels[channelMention[1]]?.name || 'unknown-channel'}</span>;
     
     // Check for Custom Emoji Token :ID:
     if (isCustomEmojiToken(part)) {
@@ -540,7 +557,7 @@ const Message = memo(({
 
   return (
     <article 
-      className={`group relative flex gap-3 px-4 py-0.5 hover:bg-[#2e3035] ${replyTarget === message._id ? 'bg-[#3a3f66]/20' : ''}`} 
+      className={`group relative flex gap-3 px-4 py-0.5 hover:bg-[${COLORS.hover}] ${replyTarget === message._id ? 'bg-[#3a3f66]/20' : ''}`} 
       onMouseEnter={() => setIsMessageHovered(true)} 
       onMouseLeave={() => setIsMessageHovered(false)} 
       ref={(node) => registerMessageRef(message._id, node)}
@@ -551,7 +568,7 @@ const Message = memo(({
       <div className="min-w-0 flex-1 py-1">
         {replyId ? (
           <button
-            className="mb-1 flex max-w-full items-center gap-1 text-xs text-gray-400 hover:text-gray-200"
+            className={`mb-1 flex max-w-full items-center gap-1 text-xs text-[${COLORS.textSecondary}] hover:text-[${COLORS.textPrimary}]`}
             onClick={() => onJumpToMessage(replyId)}
             type="button"
           >
@@ -562,28 +579,28 @@ const Message = memo(({
         
         <div className="flex items-baseline justify-between">
           <div className="flex items-baseline gap-2">
-            <button className="text-sm font-semibold text-white hover:underline" onClick={() => onUserClick(author, authorId)} type="button" style={{ color: message.author?.color }}>{author.username}</button>
-            {mine && <span className="rounded bg-[#5865f2]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[#bdc3ff]">YOU</span>}
-            <time className="text-[11px] text-gray-500">{timestampDisplay}</time>
-            {message.edited && <span className="text-[10px] text-gray-500">(edited)</span>}
+            <button className={`text-sm font-semibold text-[${COLORS.textPrimary}] hover:underline`} onClick={() => onUserClick(author, authorId)} type="button" style={{ color: message.author?.color }}>{author.username}</button>
+            {mine && <span className={`rounded bg-[${COLORS.accent}]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[${COLORS.accent}]`}>YOU</span>}
+            <time className={`text-[11px] text-[${COLORS.textSecondary}]`}>{timestampDisplay}</time>
+            {message.edited && <span className={`text-[10px] text-[${COLORS.textSecondary}]`}>(edited)</span>}
           </div>
         </div>
 
         {isEditing ? (
-          <div className="mt-1 bg-[#383a40] p-2 rounded">
-            <input className="w-full bg-transparent text-gray-200 text-sm focus:outline-none mb-2" value={editContent} onChange={(e) => setEditContent(e.target.value)} autoFocus onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) saveEdit(); if (e.key === 'Escape') cancelEdit(); }} />
-            <div className="text-xs text-gray-400 flex gap-2"><span className="flex-1">escape to cancel • enter to save</span><button onClick={cancelEdit} className="hover:underline text-[#ed4245]">cancel</button><button onClick={saveEdit} className="hover:underline text-[#5865f2]">save</button></div>
+          <div className={`mt-1 bg-[${COLORS.hover}] p-2 rounded`}>
+            <input className={`w-full bg-transparent text-[${COLORS.textPrimary}] text-sm focus:outline-none mb-2`} value={editContent} onChange={(e) => setEditContent(e.target.value)} autoFocus onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) saveEdit(); if (e.key === 'Escape') cancelEdit(); }} />
+            <div className={`text-xs text-[${COLORS.textSecondary}] flex gap-2`}><span className="flex-1">escape to cancel • enter to save</span><button onClick={cancelEdit} className={`hover:underline text-[${COLORS.danger}]`}>cancel</button><button onClick={saveEdit} className={`hover:underline text-[${COLORS.accent}]`}>save</button></div>
           </div>
         ) : (
           <>
-             {contentWithoutLinks ? <p className="whitespace-pre-wrap break-words text-sm text-gray-200">{renderMessageContent(contentWithoutLinks, users, channels, onUserClick, customEmojiById, cdnUrl, onRequestOpenLink)}</p> : null}
+             {contentWithoutLinks ? <p className={`whitespace-pre-wrap break-words text-sm text-[${COLORS.textPrimary}]`}>{renderMessageContent(contentWithoutLinks, users, channels, onUserClick, customEmojiById, cdnUrl, onRequestOpenLink)}</p> : null}
           </>
         )}
 
         {resolvedImages.length > 0 && (
           <div className="mt-1.5 flex flex-wrap gap-2">
             {resolvedImages.map((img, idx) => (
-              <button className="block overflow-hidden rounded-lg border border-[#2f3237]" key={`${img.url}-${idx}`} onClick={() => onRequestOpenLink(img.url)} title={img.url} type="button">
+              <button className={`block overflow-hidden rounded-lg border border-[${COLORS.border}]`} key={`${img.url}-${idx}`} onClick={() => onRequestOpenLink(img.url)} title={img.url} type="button">
                 <img alt="Embed" className="max-h-64 max-w-full object-contain" src={img.src} loading="lazy" />
               </button>
             ))}
@@ -595,8 +612,8 @@ const Message = memo(({
             {message.attachments.map((attachment, index) => {
               const { attachmentId, filename, url, image } = getAttachmentData(attachment, cdnUrl, index);
               if (!attachmentId || !url) return null;
-              if (image) return <a className="block overflow-hidden rounded border border-[#3a3d42]" href={url} key={attachmentId} rel="noreferrer" target="_blank" title={filename}><img alt={filename} className="max-h-64 max-w-full object-contain" src={url} /></a>;
-              return <a className="rounded bg-[#232428] px-2 py-1 text-xs text-[#bdc3ff] hover:bg-[#2f3136]" href={url} key={attachmentId} rel="noreferrer" target="_blank">📎 {filename}</a>;
+              if (image) return <a className={`block overflow-hidden rounded border border-[${COLORS.border}]`} href={url} key={attachmentId} rel="noreferrer" target="_blank" title={filename}><img alt={filename} className="max-h-64 max-w-full object-contain" src={url} /></a>;
+              return <a className={`rounded bg-[${COLORS.hover}] px-2 py-1 text-xs text-[${COLORS.textPrimary}] hover:bg-[${COLORS.surface}]`} href={url} key={attachmentId} rel="noreferrer" target="_blank">📎 {filename}</a>;
             })}
           </div>
         )}
@@ -606,7 +623,7 @@ const Message = memo(({
             const reacted = userIds.includes(me);
             const customEmoji = resolveCustomEmojiMeta(emoji, customEmojiById);
             return (
-              <button className={`rounded-full border px-2 py-0.5 text-xs flex items-center gap-1 ${reacted ? 'border-[#5865f2] bg-[#5865f2]/20 text-[#d7ddff]' : 'border-[#4c4f56] bg-[#2b2d31] text-gray-200 hover:bg-[#35373c]'}`} key={emoji} onClick={() => onToggleReaction(message, emoji, reacted)} title={`${customEmoji?.name || emoji}`} type="button">
+              <button className={`rounded-full border px-2 py-0.5 text-xs flex items-center gap-1 ${reacted ? `border-[${COLORS.accent}] bg-[${COLORS.accent}]/20 text-[#d7ddff]` : `border-[${COLORS.border}] bg-[${COLORS.surface}] text-[${COLORS.textPrimary}] hover:bg-[${COLORS.hover}]`}`} key={emoji} onClick={() => onToggleReaction(message, emoji, reacted)} title={`${customEmoji?.name || emoji}`} type="button">
                 {renderEmojiVisual(emoji, customEmoji, cdnUrl)} {userIds.length}
               </button>
             );
@@ -615,25 +632,25 @@ const Message = memo(({
       </div>
 
       <div className={`absolute right-4 -top-2 z-10 ${isMessageHovered || showReactionPicker ? 'opacity-100' : 'opacity-0'} transition-opacity duration-100`}>
-         <div className="flex items-center bg-[#313338] border border-[#2f3237] rounded shadow-sm">
-            <button className="p-1.5 text-gray-400 hover:text-gray-200 hover:bg-[#404249] rounded-l" onClick={() => onReply(message)} title="Reply"><Reply size={14} /></button>
-            <button className="p-1.5 text-gray-400 hover:text-gray-200 hover:bg-[#404249]" onClick={() => setShowReactionPicker(!showReactionPicker)} title="Add Reaction"><Smile size={14} /></button>
+         <div className={`flex items-center bg-[${COLORS.surface}] border border-[${COLORS.border}] rounded shadow-sm`}>
+            <button className={`p-1.5 text-[${COLORS.textSecondary}] hover:text-[${COLORS.textPrimary}] hover:bg-[${COLORS.hover}] rounded-l`} onClick={() => onReply(message)} title="Reply"><Reply size={14} /></button>
+            <button className={`p-1.5 text-[${COLORS.textSecondary}] hover:text-[${COLORS.textPrimary}] hover:bg-[${COLORS.hover}]`} onClick={() => setShowReactionPicker(!showReactionPicker)} title="Add Reaction"><Smile size={14} /></button>
             {mine && (
               <>
-                <button className="p-1.5 text-gray-400 hover:text-gray-200 hover:bg-[#404249]" onClick={startEditing} title="Edit"><Edit2 size={14} /></button>
-                <button className="p-1.5 text-red-400 hover:text-red-200 hover:bg-[#404249] rounded-r" onClick={() => onDeleteMessage(message._id)} title="Delete"><Trash2 size={14} /></button>
+                <button className={`p-1.5 text-[${COLORS.textSecondary}] hover:text-[${COLORS.textPrimary}] hover:bg-[${COLORS.hover}]`} onClick={startEditing} title="Edit"><Edit2 size={14} /></button>
+                <button className={`p-1.5 text-[${COLORS.danger}] hover:text-[${COLORS.danger}]/80 hover:bg-[${COLORS.hover}] rounded-r`} onClick={() => onDeleteMessage(message._id)} title="Delete"><Trash2 size={14} /></button>
               </>
             )}
          </div>
       </div>
 
       {showReactionPicker && (
-        <div ref={pickerRef} onMouseLeave={() => setShowReactionPicker(false)} className="absolute right-0 bottom-8 z-30 w-72 max-h-64 rounded-lg border border-[#4c4f56] bg-[#232428] p-2 shadow-2xl overflow-y-auto">
-          <p className="mb-2 px-1 text-[10px] uppercase tracking-wide text-gray-500 font-bold sticky top-0 bg-[#232428] z-10">Standard</p>
+        <div ref={pickerRef} onMouseLeave={() => setShowReactionPicker(false)} className={`absolute right-0 bottom-8 z-30 w-72 max-h-64 rounded-lg border border-[${COLORS.border}] bg-[${COLORS.surface}] p-2 shadow-2xl overflow-y-auto`}>
+          <p className={`mb-2 px-1 text-[10px] uppercase tracking-wide text-[${COLORS.textSecondary}] font-bold sticky top-0 bg-[${COLORS.surface}] z-10`}>Standard</p>
           <div className="grid grid-cols-8 gap-1 mb-2">
             {STANDARD_EMOJIS.map((emoji) => (
                <button
-                className="grid h-8 place-items-center rounded hover:bg-[#3a3d42]"
+                className={`grid h-8 place-items-center rounded hover:bg-[${COLORS.hover}]`}
                 key={emoji}
                 onClick={() => {
                   onToggleReaction(message, emoji, message.reactions?.[emoji]?.includes(me));
@@ -647,11 +664,11 @@ const Message = memo(({
           </div>
            {reactionOptions.some(o => o.custom) && (
               <>
-                <p className="mb-2 px-1 text-[10px] uppercase tracking-wide text-gray-500 font-bold sticky top-0 bg-[#232428] z-10">Custom</p>
+                <p className={`mb-2 px-1 text-[10px] uppercase tracking-wide text-[${COLORS.textSecondary}] font-bold sticky top-0 bg-[${COLORS.surface}] z-10`}>Custom</p>
                 <div className="grid grid-cols-8 gap-1">
                   {reactionOptions.filter(o => o.custom).map((option) => (
                     <button
-                      className="grid h-8 place-items-center rounded hover:bg-[#3a3d42]"
+                      className={`grid h-8 place-items-center rounded hover:bg-[${COLORS.hover}]`}
                       key={option.value}
                       onClick={() => {
                         onToggleReaction(message, option.value, message.reactions?.[option.value]?.includes(me));
@@ -720,6 +737,7 @@ function AppShell() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [privacyConsent, setPrivacyConsent] = useState(false);
   const [wsReconnectAttempt, setWsReconnectAttempt] = useState(0);
+  const [hasMoreMessages, setHasMoreMessages] = useState(true);
 
   const wsRef = useRef(null);
   const messagesBottomRef = useRef(null);
@@ -764,14 +782,14 @@ function AppShell() {
   // --- Render Item Helper ---
   // Defined here so it can access config.cdnUrl and openUserProfile from closure
   const renderMemberItem = useCallback((item) => {
-    if (item.type === 'header') return <div className="pt-4 pb-1 px-4 text-xs font-bold uppercase tracking-wide text-gray-400 flex items-center gap-1">{item.name} — {item.count}</div>;
+    if (item.type === 'header') return <div className={`pt-4 pb-1 px-4 text-xs font-bold uppercase tracking-wide text-[${COLORS.textSecondary}] flex items-center gap-1`}>{item.name} — {item.count}</div>;
     const member = item.data;
     return (
-      <button className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-[#35373c]" onClick={() => openUserProfile(member.user, member._id.user)}>
+      <button className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-[${COLORS.hover}]`} onClick={() => openUserProfile(member.user, member._id.user)}>
         <Avatar animateOnHover cdnUrl={config.cdnUrl} size="sm" user={member.user} />
         <div className="min-w-0">
-          <div className="truncate text-sm font-medium" style={{ color: member.color || '#f2f3f5' }}>{member.nickname || member.user.username}</div>
-          <div className="flex items-center gap-1 text-[11px] text-gray-500"><User size={11} /> {member.user.status?.presence || 'Offline'}</div>
+          <div className="truncate text-sm font-medium" style={{ color: member.color || COLORS.textPrimary }}>{member.nickname || member.user.username}</div>
+          <div className={`flex items-center gap-1 text-[11px] text-[${COLORS.textSecondary}]`}><User size={11} /> {member.user.status?.presence || 'Offline'}</div>
         </div>
       </button>
     );
@@ -882,6 +900,9 @@ function AppShell() {
              return { ...prev, [channelId]: uniqueMessages(orderedMessages) };
           }
       });
+      
+      // If we got fewer messages than requested, we likely hit the end
+      if (payloadMessages.length < 100) setHasMoreMessages(false);
       
       void fetchMissingUsers(orderedMessages);
       if (!beforeId) preloadedChannelRef.current[channelId] = true;
@@ -1033,7 +1054,44 @@ function AppShell() {
 
   const isNearBottom = () => { const container = messagesContainerRef.current; if (!container) return true; return container.scrollHeight - container.scrollTop - container.clientHeight <= 72; };
 
-  useEffect(() => { const container = messagesContainerRef.current; if (!container) return; autoFollowRef.current = true; const handleScroll = () => { if (isProgrammaticScrollRef.current) return; const nearBottom = isNearBottom(); autoFollowRef.current = nearBottom; setShowGoLatest((prev) => (prev === !nearBottom ? prev : !nearBottom)); }; container.addEventListener('scroll', handleScroll); return () => container.removeEventListener('scroll', handleScroll); }, [selectedChannelId]);
+  // Scroll handler for pagination
+  useEffect(() => {
+     const container = messagesContainerRef.current;
+     if (!container) return;
+     
+     autoFollowRef.current = true;
+     
+     const handleScroll = () => {
+        if (isProgrammaticScrollRef.current) return;
+        const nearBottom = isNearBottom();
+        autoFollowRef.current = nearBottom;
+        setShowGoLatest(!nearBottom);
+        
+        // Infinite Scroll Logic (Scroll Up)
+        // If we have more messages to load and we scroll near the top
+        if (container.scrollTop < 50 && !isMembersLoading && hasMoreMessages) {
+            const oldestMessage = currentMessages[0];
+            if (oldestMessage) {
+               // Preserve scroll position relative to bottom
+               const oldScrollHeight = container.scrollHeight;
+               
+               fetchMessages(selectedChannelId, oldestMessage._id).then(() => {
+                  // After fetch, adjust scroll
+                  requestAnimationFrame(() => {
+                      if (container) {
+                          const newScrollHeight = container.scrollHeight;
+                          container.scrollTop = newScrollHeight - oldScrollHeight;
+                      }
+                  });
+               });
+            }
+        }
+     };
+     
+     container.addEventListener('scroll', handleScroll);
+     return () => container.removeEventListener('scroll', handleScroll);
+  }, [selectedChannelId, currentMessages, isMembersLoading, fetchMessages, hasMoreMessages]); 
+
   useEffect(() => { if (autoFollowRef.current || isNearBottom()) { isProgrammaticScrollRef.current = true; messagesBottomRef.current?.scrollIntoView({ behavior: 'auto' }); requestAnimationFrame(() => { isProgrammaticScrollRef.current = false; }); autoFollowRef.current = true; setShowGoLatest(false); return; } setShowGoLatest(true); }, [currentMessages]);
   useEffect(() => { if (!selectedChannelId || selectedChannelId === 'friends') return; const missingReplyIds = currentMessages.map((message) => getReplyIdFromMessage(message)).filter((replyId) => replyId && !replyMessageCacheRef.current[replyId] && !currentMessageMap[replyId]); [...new Set(missingReplyIds)].slice(0, 10).forEach((replyId) => { void fetchReplyMessage(selectedChannelId, replyId); }); }, [currentMessages, currentMessageMap, selectedChannelId]);
   useEffect(() => { if (!voiceNotice) return; const timeout = setTimeout(() => setVoiceNotice(''), 3500); return () => clearTimeout(timeout); }, [voiceNotice]);
@@ -1075,7 +1133,7 @@ function AppShell() {
       <div className="min-h-screen bg-[#1e1f22] px-4 py-10 text-gray-100">
         <div className="mx-auto max-w-md rounded-2xl border border-[#202225] bg-[#2b2d31] p-8 shadow-2xl">
           <div className="mb-6 text-center">
-            <div className="mx-auto mb-3 grid h-16 w-16 place-items-center rounded-2xl bg-gradient-to-br from-[#5865f2] to-[#8ea1ff] text-2xl font-extrabold text-white">E</div>
+            <img src="assets/android-chrome-192x192.png" alt="Ermine Logo" className="mx-auto mb-3 h-16 w-16 rounded-2xl" />
             <h1 className="text-2xl font-bold text-white">Ermine</h1>
             <p className="text-sm text-gray-400">Branded stoat.chat client with a Discord-inspired layout.</p>
           </div>
@@ -1116,11 +1174,11 @@ function AppShell() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#1e1f22] text-gray-100">
+    <div className={`flex h-screen overflow-hidden bg-[${COLORS.bg}] text-[${COLORS.textPrimary}] font-sans`}>
       {activeModal === 'create-server' ? (
         <Modal onClose={() => setActiveModal(null)} title="Create a server">
           <input className={inputBase} onChange={(e) => setCreateServerName(e.target.value)} placeholder="Server name" value={createServerName} />
-          <button className="w-full rounded-md bg-[#3ba55d] py-2 text-sm font-semibold text-white hover:bg-[#328a4f]" onClick={createServer}>Create server</button>
+          <button className={`w-full rounded-md bg-[${COLORS.success}] py-2 text-sm font-semibold text-[${COLORS.bg}] hover:bg-[${COLORS.success}]/90`} onClick={createServer}>Create server</button>
         </Modal>
       ) : null}
       
@@ -1128,17 +1186,17 @@ function AppShell() {
         <Modal onClose={() => setActiveModal(null)} title="Server Settings">
           <div className="space-y-4">
              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Server Name</label>
+                <label className={`block text-xs font-semibold uppercase tracking-wide text-[${COLORS.textSecondary}] mb-2`}>Server Name</label>
                 <div className="flex gap-2">
                    <input className={inputBase} onChange={(e) => setEditServerName(e.target.value)} value={editServerName} placeholder="Enter server name" />
-                   <button onClick={updateServer} disabled={isUpdatingServer || !editServerName.trim()} className="rounded bg-[#5865f2] px-3 text-white hover:bg-[#4956d8] disabled:opacity-50"><Save size={18} /></button>
+                   <button onClick={updateServer} disabled={isUpdatingServer || !editServerName.trim()} className={`rounded bg-[${COLORS.accent}] px-3 text-[${COLORS.bg}] hover:bg-[${COLORS.active}] disabled:opacity-50`}><Save size={18} /></button>
                 </div>
              </div>
-             <div className="border-t border-[#202225] pt-4 mt-4">
-                <h4 className="text-xs font-bold text-red-400 uppercase tracking-wide mb-2">Danger Zone</h4>
-                <div className="flex items-center justify-between rounded border border-red-900/50 p-3 bg-red-900/10">
+             <div className={`border-t border-[${COLORS.border}] pt-4 mt-4`}>
+                <h4 className={`text-xs font-bold text-[${COLORS.danger}] uppercase tracking-wide mb-2`}>Danger Zone</h4>
+                <div className={`flex items-center justify-between rounded border border-[${COLORS.danger}]/50 p-3 bg-[${COLORS.danger}]/10`}>
                    <div><div className="font-semibold text-white">Delete Server</div><div className="text-xs text-gray-400">Permanently remove this server and all its contents.</div></div>
-                   <button onClick={deleteServer} disabled={isUpdatingServer} className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-sm font-semibold transition-colors">Delete Server</button>
+                   <button onClick={deleteServer} disabled={isUpdatingServer} className={`px-3 py-1.5 bg-[${COLORS.danger}] hover:bg-[${COLORS.danger}]/80 text-white rounded text-sm font-semibold transition-colors`}>Delete Server</button>
                 </div>
              </div>
           </div>
@@ -1148,9 +1206,9 @@ function AppShell() {
       {activeModal === 'discovery' ? (
         <Modal onClose={() => setActiveModal(null)} title="Server Discovery">
            <div className="p-4 text-center">
-              <Search size={48} className="mx-auto text-green-500 mb-4" />
+              <Search size={48} className={`mx-auto text-[${COLORS.success}] mb-4`} />
               <h3 className="text-lg font-bold text-white mb-2">Explore Communities</h3>
-              <p className="text-sm text-gray-400">
+              <p className={`text-sm text-[${COLORS.textSecondary}]`}>
                  Server discovery is coming soon to Ermine! Stay tuned to find new communities.
               </p>
            </div>
@@ -1160,18 +1218,18 @@ function AppShell() {
       {activeModal === 'set-status' ? (
         <Modal onClose={() => setActiveModal(null)} title="Set your status">
           <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Presence</p>
+            <p className={`mb-2 text-xs font-semibold uppercase tracking-wide text-[${COLORS.textSecondary}]`}>Presence</p>
             <div className="grid grid-cols-1 gap-2">
               {STATUS_OPTIONS.map((option) => (
-                <button className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-left transition ${statusDraft.presence === option.value ? 'border-[#5865f2] bg-[#2c3163]/45' : 'border-[#2f3237] bg-[#1f2024] hover:border-[#3f4451] hover:bg-[#282a31]'}`} key={option.value} onClick={() => setStatusDraft((prev) => ({ ...prev, presence: option.value }))} type="button">
-                  <span className={`rounded-full ${option.value === 'Focus' ? 'border-2 border-[#4f7dff] bg-[#4f7dff]/10 p-[6px] text-[#4f7dff]' : 'p-1.5'} ${option.iconClass}`}><option.icon size={15} /></span>
+                <button className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-left transition ${statusDraft.presence === option.value ? `border-[${COLORS.accent}] bg-[${COLORS.accent}]/10` : `border-[${COLORS.border}] bg-[${COLORS.input}] hover:border-[${COLORS.textSecondary}] hover:bg-[${COLORS.hover}]`}`} key={option.value} onClick={() => setStatusDraft((prev) => ({ ...prev, presence: option.value }))} type="button">
+                  <span className={`rounded-full ${option.value === 'Focus' ? `border-2 border-[${COLORS.active}] bg-[${COLORS.active}]/10 p-[6px] text-[${COLORS.active}]` : 'p-1.5'} ${option.iconClass}`}><option.icon size={15} /></span>
                   <span className="text-sm text-gray-100">{option.label}</span>
                 </button>
               ))}
             </div>
           </div>
-          <label className="block text-xs font-semibold uppercase tracking-wide text-gray-400">Custom status<input className={`${inputBase} mt-1`} maxLength={128} onChange={(event) => setStatusDraft((prev) => ({ ...prev, text: event.target.value }))} placeholder="What's up?" value={statusDraft.text} /></label>
-          <button className="w-full rounded-md bg-[#5865f2] py-2 text-sm font-semibold text-white hover:bg-[#4956d8]" disabled={isSavingStatus} onClick={saveStatus} type="button">{isSavingStatus ? 'Saving…' : 'Save status'}</button>
+          <label className={`block text-xs font-semibold uppercase tracking-wide text-[${COLORS.textSecondary}]`}>Custom status<input className={`${inputBase} mt-1`} maxLength={128} onChange={(event) => setStatusDraft((prev) => ({ ...prev, text: event.target.value }))} placeholder="What's up?" value={statusDraft.text} /></label>
+          <button className={`w-full rounded-md bg-[${COLORS.accent}] py-2 text-sm font-semibold text-[${COLORS.bg}] hover:bg-[${COLORS.active}]`} disabled={isSavingStatus} onClick={saveStatus} type="button">{isSavingStatus ? 'Saving…' : 'Save status'}</button>
         </Modal>
       ) : null}
 
@@ -1179,42 +1237,42 @@ function AppShell() {
         <Modal onClose={() => setActiveModal(null)} title="User Settings">
            <div className="space-y-6">
               <div className="flex flex-col items-center">
-                 <div className="w-full h-24 rounded-t-lg bg-gray-700 overflow-hidden relative">
+                 <div className={`w-full h-24 rounded-t-lg bg-[${COLORS.surface}] relative`}>
                     {getBannerUrl(users[auth.userId], config.cdnUrl) ? (
                        <img src={getBannerUrl(users[auth.userId], config.cdnUrl)} alt="Banner" className="w-full h-full object-cover rounded-t-lg" />
                     ) : (
-                       <div className="w-full h-full bg-gradient-to-r from-[#3b3f6b] to-[#5865f2]" />
+                       <div className={`w-full h-full bg-gradient-to-r from-[#3b3f6b] to-[${COLORS.accent}] rounded-t-lg`} />
                     )}
-                    <div className="absolute -bottom-8 left-4 p-1 bg-[#1e1f22] rounded-full">
-                       <Avatar user={users[auth.userId]} cdnUrl={config.cdnUrl} size="lg" />
+                    <div className={`absolute -bottom-8 left-4 p-1 bg-[${COLORS.surface}] rounded-full z-10`}>
+                       <Avatar user={users[auth.userId]} cdnUrl={config.cdnUrl} size="lg" alwaysAnimate={true} />
                     </div>
                  </div>
-                 <div className="w-full px-4 pt-10">
+                 <div className="w-full px-4 pt-10 mt-2">
                     <h2 className="text-xl font-bold text-white">{users[auth.userId]?.username || 'User'}</h2>
-                    <p className="text-xs text-gray-400">#{users[auth.userId]?.discriminator || '0000'}</p>
+                    <p className={`text-xs text-[${COLORS.textSecondary}]`}>#{users[auth.userId]?.discriminator || '0000'}</p>
                  </div>
               </div>
 
-              <div className="border-t border-[#2f3237] pt-4 px-4">
-                 <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-3">About Ermine</h3>
-                 <div className="flex items-start gap-3 bg-[#2b2d31] p-3 rounded-lg mb-3">
-                    <div className="p-2 bg-[#5865f2] rounded-lg">
-                       <Smile size={20} className="text-white" />
+              <div className={`border-t border-[${COLORS.border}] pt-4 px-4`}>
+                 <h3 className={`text-xs font-bold text-[${COLORS.textSecondary}] uppercase tracking-wide mb-3`}>About Ermine</h3>
+                 <div className={`flex items-start gap-3 bg-[${COLORS.input}] p-3 rounded-lg mb-3`}>
+                    <div className={`p-2 bg-[${COLORS.accent}] rounded-lg`}>
+                       <Smile size={20} className={`text-[${COLORS.bg}]`} />
                     </div>
                     <div>
                        <h4 className="text-sm font-bold text-white">Support Stoat Chat</h4>
-                       <p className="text-xs text-gray-400 mt-1">Ermine is a passionate project built for the Stoat community. Consider donating to keep the lights on!</p>
-                       <a href="https://ko-fi.com/stoatchat" target="_blank" rel="noopener noreferrer" className="inline-block mt-2 text-xs font-semibold text-[#5865f2] hover:underline">Donate on Ko-fi &rarr;</a>
+                       <p className={`text-xs text-[${COLORS.textSecondary}] mt-1`}>Ermine is a passionate project built for the Stoat community. Consider donating to keep the lights on!</p>
+                       <a href="https://ko-fi.com/stoatchat" target="_blank" rel="noopener noreferrer" className={`inline-block mt-2 text-xs font-semibold text-[${COLORS.accent}] hover:underline`}>Donate on Ko-fi &rarr;</a>
                     </div>
                  </div>
                  
-                 <div className="flex items-start gap-3 bg-[#2b2d31] p-3 rounded-lg">
-                     <div className="p-2 bg-gray-700 rounded-lg">
+                 <div className={`flex items-start gap-3 bg-[${COLORS.input}] p-3 rounded-lg`}>
+                     <div className={`p-2 bg-[${COLORS.surface}] rounded-lg`}>
                        <AlertCircle size={20} className="text-white" />
                     </div>
                     <div>
                        <h4 className="text-sm font-bold text-white">Client Info</h4>
-                       <p className="text-xs text-gray-400 mt-1">
+                       <p className={`text-xs text-[${COLORS.textSecondary}] mt-1`}>
                           Version: 1.2.0 (Wii U Compatible)<br/>
                           Mode: {isLowSpec ? 'Lite (Performance Mode)' : 'Standard'}
                        </p>
@@ -1227,81 +1285,75 @@ function AppShell() {
 
       {linkPromptUrl ? (
         <Modal onClose={() => setLinkPromptUrl(null)} title="Ermine link check">
-          <div className="rounded-md bg-[#1e1f22] p-3 text-sm text-gray-200">
-            <p className="text-xs uppercase tracking-wide text-gray-500">Do you trust this link?</p>
-            <p className="mt-2 break-all text-[#bdc3ff]">{linkPromptUrl}</p>
-            <p className="mt-2 text-xs text-gray-400">Ermine says: only open links from people and servers you trust.</p>
-          </div>
+          <div className={`rounded-md bg-[${COLORS.input}] p-3 text-sm text-[${COLORS.textPrimary}]`}><p className={`text-xs uppercase tracking-wide text-[${COLORS.textSecondary}]`}>Do you trust this link?</p><p className={`mt-2 break-all text-[${COLORS.accent}]`}>{linkPromptUrl}</p><p className={`mt-2 text-xs text-[${COLORS.textSecondary}]`}>Ermine says: only open links from people and servers you trust.</p></div>
           <div className="grid grid-cols-2 gap-2">
-            <button className="rounded-md bg-[#3a3d42] py-2 text-sm font-semibold text-gray-200 hover:bg-[#4a4d55]" onClick={() => setLinkPromptUrl(null)} type="button">Cancel</button>
-            <button className="rounded-md bg-[#5865f2] py-2 text-sm font-semibold text-white hover:bg-[#4956d8]" onClick={confirmOpenLink} type="button">Open link</button>
+            <button className={`rounded-md bg-[${COLORS.surface}] py-2 text-sm font-semibold text-[${COLORS.textPrimary}] hover:bg-[${COLORS.hover}]`} onClick={() => setLinkPromptUrl(null)} type="button">Cancel</button>
+            <button className={`rounded-md bg-[${COLORS.accent}] py-2 text-sm font-semibold text-[${COLORS.bg}] hover:bg-[${COLORS.active}]`} onClick={confirmOpenLink} type="button">Open link</button>
           </div>
         </Modal>
       ) : null}
 
       {peekUser ? (
         <Modal onClose={() => setPeekUser(null)} title="Member profile">
-          <div className="overflow-hidden rounded-lg bg-[#1e1f22]">
-            {peekBannerUrl ? <img alt="Profile banner" className="h-24 w-full object-cover" src={peekBannerUrl} /> : <div className="h-20 w-full bg-gradient-to-r from-[#3b3f6b] to-[#5865f2]" />}
+          <div className={`overflow-hidden rounded-lg bg-[${COLORS.input}]`}>
+            {peekBannerUrl ? <img alt="Profile banner" className="h-24 w-full object-cover" src={peekBannerUrl} /> : <div className={`h-20 w-full bg-gradient-to-r from-[#3b3f6b] to-[${COLORS.accent}]`} />}
             <div className="flex items-center gap-3 p-3">
               <Avatar alwaysAnimate cdnUrl={config.cdnUrl} size="lg" user={peekUser} />
               <div>
                 <div className="text-base font-semibold text-white">{peekUser?.username || 'Unknown user'}</div>
-                <div className="text-xs text-gray-400">#{peekUser?.discriminator || '0000'}</div>
+                <div className={`text-xs text-[${COLORS.textSecondary}]`}>#{peekUser?.discriminator || '0000'}</div>
               </div>
             </div>
           </div>
-          <div className="grid grid-cols-1 gap-2 rounded-md bg-[#1e1f22] p-3 text-xs text-gray-300">
+          <div className={`grid grid-cols-1 gap-2 rounded-md bg-[${COLORS.input}] p-3 text-xs text-[${COLORS.textSecondary}]`}>
             <p><span className="font-semibold text-gray-100">Joined platform:</span> {toDateLabel(peekPlatformJoined)}</p>
             <p><span className="font-semibold text-gray-100">Joined server:</span> {selectedServerId === '@me' ? 'N/A' : toDateLabel(peekServerJoined)}</p>
           </div>
-          <div className="space-y-1 rounded-md bg-[#1e1f22] p-3">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">About me</p>
-            <p className="text-sm text-gray-200">{peekAboutMe || 'This user has not set an About Me yet.'}</p>
+          <div className={`space-y-1 rounded-md bg-[${COLORS.input}] p-3`}>
+            <p className={`text-[11px] font-semibold uppercase tracking-wide text-[${COLORS.textSecondary}]`}>About me</p>
+            <p className={`text-sm text-[${COLORS.textPrimary}]`}>{peekAboutMe || 'This user has not set an About Me yet.'}</p>
           </div>
-          <div className="space-y-1 rounded-md bg-[#1e1f22] p-3">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Badges</p>
-            {peekBadges.length ? <div className="flex flex-wrap gap-1.5">{peekBadges.map((badge) => <span className="rounded bg-[#5865f2]/20 px-2 py-1 text-xs text-[#d7ddff]" key={badge}>{badge}</span>)}</div> : <p className="text-xs text-gray-400">No badges</p>}
+          <div className={`space-y-1 rounded-md bg-[${COLORS.input}] p-3`}>
+            <p className={`text-[11px] font-semibold uppercase tracking-wide text-[${COLORS.textSecondary}]`}>Badges</p>
+            {peekBadges.length ? <div className="flex flex-wrap gap-1.5">{peekBadges.map((badge) => <span className={`rounded bg-[${COLORS.accent}]/20 px-2 py-1 text-xs text-[${COLORS.accent}]`} key={badge}>{badge}</span>)}</div> : <p className={`text-xs text-[${COLORS.textSecondary}]`}>No badges</p>}
           </div>
-          <div className="space-y-1 rounded-md bg-[#1e1f22] p-3">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Roles</p>
-            {peekRoles.length ? <div className="flex flex-wrap gap-1.5">{peekRoles.map((role) => <span className="rounded bg-[#3a3d42] px-2 py-1 text-xs text-gray-200" key={role.name}>{role.name}</span>)}</div> : <p className="text-xs text-gray-400">No server roles</p>}
+          <div className={`space-y-1 rounded-md bg-[${COLORS.input}] p-3`}>
+            <p className={`text-[11px] font-semibold uppercase tracking-wide text-[${COLORS.textSecondary}]`}>Roles</p>
+            {peekRoles.length ? <div className="flex flex-wrap gap-1.5">{peekRoles.map((role) => <span className={`rounded bg-[${COLORS.surface}] px-2 py-1 text-xs text-[${COLORS.textPrimary}]`} key={role.name}>{role.name}</span>)}</div> : <p className={`text-xs text-[${COLORS.textSecondary}]`}>No server roles</p>}
           </div>
         </Modal>
       ) : null}
 
-      <aside className="flex w-[72px] flex-col items-center gap-2 overflow-y-auto bg-[#111214] py-3">
-        <button className={`grid h-12 w-12 place-items-center transition ${selectedServerId === '@me' ? 'rounded-2xl bg-[#5865f2]' : 'rounded-full bg-[#313338] hover:rounded-2xl hover:bg-[#5865f2]'}`} onClick={() => handleServerSelect('@me')}>
-          <MessageSquare size={20} />
-        </button>
-        <div className="h-px w-8 bg-[#202225]" />
+      <aside className={`flex w-[72px] flex-col items-center gap-2 overflow-y-auto bg-[${COLORS.bg}] py-3 border-r border-[${COLORS.border}]`}>
+        <button className={`grid h-12 w-12 place-items-center transition ${selectedServerId === '@me' ? `rounded-2xl bg-[${COLORS.accent}] text-[${COLORS.bg}]` : `rounded-full bg-[${COLORS.surface}] text-[${COLORS.textSecondary}] hover:rounded-2xl hover:bg-[${COLORS.accent}] hover:text-[${COLORS.bg}]`}`} onClick={() => handleServerSelect('@me')}><MessageSquare size={20} /></button>
+        <div className={`h-px w-8 bg-[${COLORS.border}]`} />
 
         {serverList.map((server) => {
           const icon = getIconUrl(server, config.cdnUrl);
           const active = selectedServerId === server._id;
 
           return (
-            <button className={`grid h-12 w-12 place-items-center overflow-hidden transition ${active ? 'rounded-2xl bg-[#5865f2]' : 'rounded-full bg-[#313338] hover:rounded-2xl hover:bg-[#5865f2]'}`} key={server._id} onClick={() => handleServerSelect(server._id)} title={server.name}>
-              {icon ? <img alt={server.name} className="h-full w-full object-cover" src={icon} /> : <span className="text-sm font-bold">{server.name.slice(0, 2).toUpperCase()}</span>}
+            <button className={`grid h-12 w-12 place-items-center overflow-hidden transition ${active ? `rounded-2xl bg-[${COLORS.accent}]` : `rounded-full bg-[${COLORS.surface}] hover:rounded-2xl hover:bg-[${COLORS.accent}]`}`} key={server._id} onClick={() => handleServerSelect(server._id)} title={server.name}>
+              {icon ? <img alt={server.name} className="h-full w-full object-cover" src={icon} /> : <span className={`text-sm font-bold ${active ? `text-[${COLORS.bg}]` : `text-[${COLORS.textPrimary}]`}`}>{server.name.slice(0, 2).toUpperCase()}</span>}
             </button>
           );
         })}
 
-        <button className="grid h-12 w-12 place-items-center rounded-full bg-[#313338] text-[#3ba55d] transition hover:rounded-2xl hover:bg-[#3ba55d] hover:text-white" onClick={() => setActiveModal('create-server')}>
+        <button className={`grid h-12 w-12 place-items-center rounded-full bg-[${COLORS.surface}] text-[${COLORS.success}] transition hover:rounded-2xl hover:bg-[${COLORS.success}] hover:text-[${COLORS.bg}]`} onClick={() => setActiveModal('create-server')}>
           <Plus size={20} />
         </button>
-        <button className="grid h-12 w-12 place-items-center rounded-full bg-[#313338] text-green-500 transition hover:rounded-2xl hover:bg-green-600 hover:text-white" onClick={() => setActiveModal('discovery')} title="Server Discovery">
+        <button className={`grid h-12 w-12 place-items-center rounded-full bg-[${COLORS.surface}] text-[${COLORS.accent}] transition hover:rounded-2xl hover:bg-[${COLORS.accent}] hover:text-[${COLORS.bg}]`} onClick={() => setActiveModal('discovery')} title="Server Discovery">
            <Search size={20} />
         </button>
       </aside>
 
-      <aside className="hidden w-60 flex-col bg-[#2b2d31] md:flex">
-        <div className="border-b border-[#202225] px-4 py-3 flex justify-between items-center">
-          <div className="truncate text-sm font-bold text-white">{selectedServerId === '@me' ? 'Ermine Home' : servers[selectedServerId]?.name || 'Server'}</div>
+      <aside className={`hidden w-60 flex-col bg-[${COLORS.surface}] md:flex border-r border-[${COLORS.border}]`}>
+        <div className={`border-b border-[${COLORS.border}] px-4 py-3 flex justify-between items-center`}>
+          <div className={`truncate text-sm font-bold text-[${COLORS.textPrimary}]`}>{selectedServerId === '@me' ? 'Ermine Home' : servers[selectedServerId]?.name || 'Server'}</div>
           {isServerOwner && selectedServerId !== '@me' && (
              <button 
                onClick={openServerSettings} 
-               className="text-gray-400 hover:text-white transition-colors" 
+               className={`text-[${COLORS.textSecondary}] hover:text-[${COLORS.textPrimary}] transition-colors`} 
                title="Server Settings"
              >
                 <Settings size={16} />
@@ -1311,7 +1363,7 @@ function AppShell() {
         <div className="flex-1 overflow-y-auto p-2">
           {selectedServerId === '@me' ? (
             <>
-              <button className={`mb-1 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${selectedChannelId === 'friends' ? 'bg-[#404249] text-white' : 'text-gray-400 hover:bg-[#35373c] hover:text-white'}`} onClick={() => handleChannelSelect('friends')}>
+              <button className={`mb-1 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${selectedChannelId === 'friends' ? `bg-[${COLORS.hover}] text-[${COLORS.textPrimary}]` : `text-[${COLORS.textSecondary}] hover:bg-[${COLORS.hover}] hover:text-[${COLORS.textPrimary}]`}`} onClick={() => handleChannelSelect('friends')}>
                 <Users size={16} /> Friends
               </button>
               {directMessageChannels.map((channel) => {
@@ -1319,7 +1371,7 @@ function AppShell() {
                 const recipient = users[recipientId];
                 const label = recipient?.username || channel.name || 'Direct Message';
                 return (
-                  <button className={`mb-0.5 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${selectedChannelId === channel._id ? 'bg-[#404249] text-white' : 'text-gray-400 hover:bg-[#35373c] hover:text-white'}`} key={channel._id} onClick={() => handleChannelSelect(channel._id)}>
+                  <button className={`mb-0.5 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${selectedChannelId === channel._id ? `bg-[${COLORS.hover}] text-[${COLORS.textPrimary}]` : `text-[${COLORS.textSecondary}] hover:bg-[${COLORS.hover}] hover:text-[${COLORS.textPrimary}]`}`} key={channel._id} onClick={() => handleChannelSelect(channel._id)}>
                     <MessageSquare size={16} />
                     <span className="truncate">{label}</span>
                   </button>
@@ -1331,7 +1383,7 @@ function AppShell() {
               const isVoice = channel?.channel_type === 'VoiceChannel';
               return (
                 <button
-                  className={`mb-0.5 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${isVoice ? 'cursor-not-allowed text-gray-500 hover:bg-[#2f3237]' : selectedChannelId === channel._id ? 'bg-[#404249] text-white' : 'text-gray-400 hover:bg-[#35373c] hover:text-white'}`}
+                  className={`mb-0.5 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${isVoice ? `cursor-not-allowed text-[${COLORS.textSecondary}]/50 hover:bg-[${COLORS.surface}]` : selectedChannelId === channel._id ? `bg-[${COLORS.hover}] text-[${COLORS.textPrimary}]` : `text-[${COLORS.textSecondary}] hover:bg-[${COLORS.hover}] hover:text-[${COLORS.textPrimary}]`}`}
                   key={channel._id}
                   onClick={() => handleChannelSelect(channel._id)}
                   title={isVoice ? "Ermine currently doesn't support voice channels." : channel.name}
@@ -1344,20 +1396,20 @@ function AppShell() {
           )}
         </div>
 
-        <div className="border-t border-[#202225] p-2">
-          <div className="flex items-center justify-between rounded bg-[#232428] p-2" onMouseEnter={() => setIsAccountHovered(true)} onMouseLeave={() => setIsAccountHovered(false)}>
-            <button className="flex min-w-0 items-center gap-2 rounded p-1 text-left hover:bg-[#2d3036]" onClick={openStatusEditor} type="button">
+        <div className={`border-t border-[${COLORS.border}] p-2`}>
+          <div className={`flex items-center justify-between rounded bg-[${COLORS.input}] p-2`} onMouseEnter={() => setIsAccountHovered(true)} onMouseLeave={() => setIsAccountHovered(false)}>
+            <button className={`flex min-w-0 items-center gap-2 rounded p-1 text-left hover:bg-[${COLORS.hover}]`} onClick={openStatusEditor} type="button">
               <Avatar alwaysAnimate={isAccountHovered} cdnUrl={config.cdnUrl} size="sm" user={users[auth.userId]} />
               <div className="min-w-0">
-                <div className="truncate text-xs font-semibold text-white">{users[auth.userId]?.username || 'Connected'}</div>
-                <div className="truncate text-[10px] uppercase tracking-wide text-gray-400">{users[auth.userId]?.status?.text || status}</div>
+                <div className={`truncate text-xs font-semibold text-[${COLORS.textPrimary}]`}>{users[auth.userId]?.username || 'Connected'}</div>
+                <div className={`truncate text-[10px] uppercase tracking-wide text-[${COLORS.textSecondary}]`}>{users[auth.userId]?.status?.text || status}</div>
               </div>
             </button>
             <div className="flex items-center gap-1">
-              <button className="rounded p-1 text-gray-400 hover:bg-[#35373c] hover:text-white" onClick={() => setActiveModal('user-settings')} title="User settings" type="button">
+              <button className={`rounded p-1 text-[${COLORS.textSecondary}] hover:bg-[${COLORS.hover}] hover:text-[${COLORS.textPrimary}]`} onClick={() => setActiveModal('user-settings')} title="User settings" type="button">
                 <Settings size={14} />
               </button>
-              <button className="rounded p-1 text-gray-400 hover:bg-[#35373c] hover:text-white" onClick={logout} title="Logout" type="button">
+              <button className={`rounded p-1 text-[${COLORS.textSecondary}] hover:bg-[${COLORS.hover}] hover:text-[${COLORS.textPrimary}]`} onClick={logout} title="Logout" type="button">
                 <LogOut size={14} />
               </button>
             </div>
@@ -1365,17 +1417,17 @@ function AppShell() {
         </div>
       </aside>
 
-      <main className="relative flex min-w-0 flex-1 flex-col bg-[#313338]">
-        <header className="flex items-center justify-between border-b border-[#202225] px-4 py-3">
-          <div className="flex items-center gap-2 text-sm font-semibold text-white">
-            {channels[selectedChannelId]?.channel_type === 'DirectMessage' ? <MessageSquare size={17} className="text-gray-400" /> : <Hash size={17} className="text-gray-400" />}
+      <main className={`relative flex min-w-0 flex-1 flex-col bg-[${COLORS.bg}]`}>
+        <header className={`flex items-center justify-between border-b border-[${COLORS.border}] px-4 py-3`}>
+          <div className={`flex items-center gap-2 text-sm font-semibold text-[${COLORS.textPrimary}]`}>
+            {channels[selectedChannelId]?.channel_type === 'DirectMessage' ? <MessageSquare size={17} className={`text-[${COLORS.textSecondary}]`} /> : <Hash size={17} className={`text-[${COLORS.textSecondary}]`} />}
             <span>{currentChannelName}</span>
           </div>
-          <div className="text-xs text-gray-400">Ermine for stoat.chat</div>
+          <div className={`text-xs text-[${COLORS.textSecondary}]`}>Ermine for stoat.chat</div>
         </header>
 
         {voiceNotice ? (
-          <div className="mx-4 mt-3 rounded-md border border-[#665200] bg-[#5c4a00]/25 px-3 py-2 text-xs text-yellow-200">
+          <div className={`mx-4 mt-3 rounded-md border border-[${COLORS.danger}] bg-[${COLORS.danger}]/10 px-3 py-2 text-xs text-[${COLORS.danger}]`}>
             {voiceNotice}
           </div>
         ) : null}
@@ -1383,14 +1435,14 @@ function AppShell() {
         <section className="flex-1 overflow-y-auto py-2" ref={messagesContainerRef}>
           {selectedChannelId === 'friends' ? (
             <div className="space-y-2 p-4">
-              <h2 className="text-xs font-bold uppercase tracking-wide text-gray-400">Friends ({friends.length})</h2>
-              {friends.length === 0 ? <p className="text-sm text-gray-400">No friends available yet.</p> : null}
+              <h2 className={`text-xs font-bold uppercase tracking-wide text-[${COLORS.textSecondary}]`}>Friends ({friends.length})</h2>
+              {friends.length === 0 ? <p className={`text-sm text-[${COLORS.textSecondary}]`}>No friends available yet.</p> : null}
               {friends.map((friend) => (
-                <button className="flex w-full items-center gap-3 rounded bg-[#2b2d31] p-3 text-left hover:bg-[#35373c]" key={friend._id} onClick={() => openDmWithUser(friend._id)}>
+                <button className={`flex w-full items-center gap-3 rounded bg-[${COLORS.surface}] p-3 text-left hover:bg-[${COLORS.hover}]`} key={friend._id} onClick={() => openDmWithUser(friend._id)}>
                   <Avatar animateOnHover cdnUrl={config.cdnUrl} user={friend} />
                   <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold text-white">{friend.username}</div>
-                    <div className="text-xs text-gray-400">Direct message</div>
+                    <div className={`truncate text-sm font-semibold text-[${COLORS.textPrimary}]`}>{friend.username}</div>
+                    <div className={`text-xs text-[${COLORS.textSecondary}]`}>Direct message</div>
                   </div>
                 </button>
               ))}
@@ -1424,19 +1476,19 @@ function AppShell() {
 
         {showGoLatest ? (
           <div className="pointer-events-none absolute bottom-24 left-1/2 z-20 -translate-x-1/2">
-            <button className="pointer-events-auto rounded-full bg-[#5865f2] px-3 py-1.5 text-xs font-semibold text-white shadow-lg hover:bg-[#4956d8]" onClick={goToLatest} type="button">
+            <button className={`pointer-events-auto rounded-full bg-[${COLORS.accent}] px-3 py-1.5 text-xs font-semibold text-[${COLORS.bg}] shadow-lg hover:bg-[${COLORS.active}]`} onClick={goToLatest} type="button">
               Go to latest
             </button>
           </div>
         ) : null}
 
-        <footer className="border-t border-[#202225] p-4">
+        <footer className={`border-t border-[${COLORS.border}] p-4`}>
           {activeReply ? (
-            <div className="mb-2 flex items-center justify-between gap-2 rounded-md bg-[#2b2d31] px-3 py-2 text-xs text-gray-300">
+            <div className={`mb-2 flex items-center justify-between gap-2 rounded-md bg-[${COLORS.surface}] px-3 py-2 text-xs text-[${COLORS.textSecondary}]`}>
               <span className="truncate">
                 Replying to {users[typeof activeReply.author === 'string' ? activeReply.author : activeReply.author?._id]?.username || 'Unknown user'}: {activeReply.content || 'Attachment / embed'}
               </span>
-              <button className="rounded p-1 text-gray-400 hover:bg-[#3a3d42] hover:text-white" onClick={() => setReplyingTo(null)} type="button">
+              <button className={`rounded p-1 text-[${COLORS.textSecondary}] hover:bg-[${COLORS.hover}] hover:text-[${COLORS.textPrimary}]`} onClick={() => setReplyingTo(null)} type="button">
                 <X size={13} />
               </button>
             </div>
@@ -1446,18 +1498,18 @@ function AppShell() {
               {pendingFiles.map((file, index) => {
                 const previewImage = isImageLike(file.name, file.type);
                 return (
-                  <button className="flex items-center gap-2 rounded bg-[#2b2d31] px-2 py-1 text-xs text-gray-200 hover:bg-[#35373c]" key={`${file.name}-${index}`} onClick={() => removePendingFile(index)} type="button">
+                  <button className={`flex items-center gap-2 rounded bg-[${COLORS.surface}] px-2 py-1 text-xs text-[${COLORS.textPrimary}] hover:bg-[${COLORS.hover}]`} key={`${file.name}-${index}`} onClick={() => removePendingFile(index)} type="button">
                     <span>{previewImage ? '🖼️' : '📎'}</span>
-                    <span>{file.name} <span className="text-gray-400">(remove)</span></span>
+                    <span>{file.name} <span className={`text-[${COLORS.textSecondary}]`}>(remove)</span></span>
                   </button>
                 );
               })}
             </div>
           ) : null}
 
-          <div className="flex items-center gap-2 rounded-lg bg-[#383a40] p-2" onDragOver={handleComposerDragOver} onDrop={handleComposerDrop}>
+          <div className={`flex items-center gap-2 rounded-lg bg-[${COLORS.input}] p-2`} onDragOver={handleComposerDragOver} onDrop={handleComposerDrop}>
             <button
-              className="rounded p-2 text-gray-300 hover:bg-[#4b4d55] hover:text-white"
+              className={`rounded p-2 text-[${COLORS.textSecondary}] hover:bg-[${COLORS.hover}] hover:text-[${COLORS.textPrimary}]`}
               disabled={selectedChannelId === 'friends' || isUploadingFiles}
               onClick={() => fileInputRef.current?.click()}
               title="Upload files"
@@ -1468,7 +1520,7 @@ function AppShell() {
             <input className="hidden" multiple onChange={handleFilePick} ref={fileInputRef} type="file" />
             <div className="relative">
               <button
-                className="rounded p-2 text-gray-300 hover:bg-[#4b4d55] hover:text-white"
+                className={`rounded p-2 text-[${COLORS.textSecondary}] hover:bg-[${COLORS.hover}] hover:text-[${COLORS.textPrimary}]`}
                 disabled={selectedChannelId === 'friends'}
                 onClick={() => setShowEmojiPicker((prev) => !prev)}
                 type="button"
@@ -1476,15 +1528,15 @@ function AppShell() {
                 <Smile size={16} />
               </button>
               {showEmojiPicker && selectedChannelId !== 'friends' ? (
-                <div ref={pickerRef} onMouseLeave={() => setShowEmojiPicker(false)} className="absolute bottom-12 left-0 z-20 w-72 rounded-lg border border-[#4c4f56] bg-[#232428] p-2 shadow-2xl max-h-64 overflow-y-auto">
-                  <p className="mb-2 px-1 text-[10px] uppercase tracking-wide text-gray-500 font-bold sticky top-0 bg-[#232428] z-10">Standard</p>
-                  <div className="grid grid-cols-8 gap-1 mb-2">{STANDARD_EMOJIS.map((emoji) => <button className="rounded p-1 text-lg hover:bg-[#3a3d42]" key={emoji} onClick={() => addEmojiToComposer(emoji)} type="button">{renderTwemoji(emoji, "w-6 h-6 inline-block")}</button>)}</div>
-                  {allCustomEmojis.length > 0 ? <><p className="mb-2 px-1 text-[10px] uppercase tracking-wide text-gray-500 font-bold sticky top-0 bg-[#232428] z-10">Server Emojis</p><div className="grid grid-cols-8 gap-1">{allCustomEmojis.map((emoji) => <button className="grid h-8 place-items-center rounded hover:bg-[#3a3d42]" key={emoji.id} onClick={() => addCustomEmojiToComposer(emoji.id)} title={`${emoji.name} from ${emoji.serverName}`} type="button">{renderEmojiVisual(`:${emoji.id}:`, { id: emoji.id, name: emoji.name }, config.cdnUrl)}</button>)}</div></> : null}
+                <div ref={pickerRef} onMouseLeave={() => setShowEmojiPicker(false)} className={`absolute bottom-12 left-0 z-20 w-72 rounded-lg border border-[${COLORS.border}] bg-[${COLORS.surface}] p-2 shadow-2xl max-h-64 overflow-y-auto`}>
+                  <p className={`mb-2 px-1 text-[10px] uppercase tracking-wide text-[${COLORS.textSecondary}] font-bold sticky top-0 bg-[${COLORS.surface}] z-10`}>Standard</p>
+                  <div className="grid grid-cols-8 gap-1 mb-2">{STANDARD_EMOJIS.map((emoji) => <button className={`rounded p-1 text-lg hover:bg-[${COLORS.hover}]`} key={emoji} onClick={() => addEmojiToComposer(emoji)} type="button">{renderTwemoji(emoji, "w-6 h-6 inline-block")}</button>)}</div>
+                  {allCustomEmojis.length > 0 ? <><p className={`mb-2 px-1 text-[10px] uppercase tracking-wide text-[${COLORS.textSecondary}] font-bold sticky top-0 bg-[${COLORS.surface}] z-10`}>Server Emojis</p><div className="grid grid-cols-8 gap-1">{allCustomEmojis.map((emoji) => <button className={`grid h-8 place-items-center rounded hover:bg-[${COLORS.hover}]`} key={emoji.id} onClick={() => addCustomEmojiToComposer(emoji.id)} title={`${emoji.name} from ${emoji.serverName}`} type="button">{renderEmojiVisual(`:${emoji.id}:`, { id: emoji.id, name: emoji.name }, config.cdnUrl)}</button>)}</div></> : null}
                 </div>
               ) : null}
             </div>
             <input
-              className="flex-1 bg-transparent px-2 py-1 text-sm text-gray-100 placeholder:text-gray-400 focus:outline-none"
+              className={`flex-1 bg-transparent px-2 py-1 text-sm text-[${COLORS.textPrimary}] placeholder:text-[${COLORS.textSecondary}] focus:outline-none`}
               disabled={selectedChannelId === 'friends'}
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={(e) => {
@@ -1496,15 +1548,15 @@ function AppShell() {
               placeholder={selectedChannelId === 'friends' ? 'Select a text channel to chat.' : `Enter message in #${currentChannelName}`}
               value={inputText}
             />
-            <button className="rounded p-2 text-gray-300 hover:bg-[#4b4d55] hover:text-white disabled:cursor-not-allowed disabled:opacity-60" disabled={isUploadingFiles} onClick={sendMessage} type="button">
+            <button className={`rounded p-2 text-[${COLORS.textSecondary}] hover:bg-[${COLORS.hover}] hover:text-[${COLORS.textPrimary}] disabled:cursor-not-allowed disabled:opacity-60`} disabled={isUploadingFiles} onClick={sendMessage} type="button">
               <Send size={16} />
             </button>
           </div>
         </footer>
       </main>
 
-      <aside className="hidden w-60 flex-col border-l border-[#202225] bg-[#2b2d31] lg:flex">
-        <div className="border-b border-[#202225] px-4 py-3 text-xs font-bold uppercase tracking-wide text-gray-400">Members — {allCurrentMembers.length}{isMembersLoading ? ' (loading...)' : ''}</div>
+      <aside className={`hidden w-60 flex-col border-l border-[${COLORS.border}] bg-[${COLORS.surface}] lg:flex`}>
+        <div className={`border-b border-[${COLORS.border}] px-4 py-3 text-xs font-bold uppercase tracking-wide text-[${COLORS.textSecondary}]`}>Members — {allCurrentMembers.length}{isMembersLoading ? ' (loading...)' : ''}</div>
         <div className="min-h-0 flex-1 relative">
           <VirtualList items={memberListItems} itemHeight={40} className="h-full w-full" renderItem={renderMemberItem} />
         </div>
