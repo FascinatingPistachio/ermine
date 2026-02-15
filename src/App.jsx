@@ -127,7 +127,7 @@ const clearCookie = (name) => {
 };
 
 const STATUS_OPTIONS = [
-  { value: 'Online', label: 'Online', icon: Circle, iconClass: 'text-[#3ba55d]' },
+  { value: 'Online', label: 'Online', icon: Circle, iconClass: 'text-[#3ba55d]' }, // Swapped Activity for Circle
   { value: 'Idle', label: 'Idle', icon: Moon, iconClass: 'text-[#f0b232]' },
   { value: 'Busy', label: 'Do Not Disturb', icon: MinusCircle, iconClass: 'text-[#ed4245]' },
   { value: 'Focus', label: 'Focus', icon: Circle, iconClass: 'text-[#4f7dff]' },
@@ -141,22 +141,14 @@ const formatSmartTime = (valueOrId) => {
   } else {
     date = new Date(valueOrId);
   }
-
   if (Number.isNaN(date.getTime())) return '';
-  
   const now = new Date();
   const yesterday = new Date();
   yesterday.setDate(now.getDate() - 1);
-  
   const timeStr = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-  
-  if (date.toDateString() === now.toDateString()) {
-    return `Today at ${timeStr}`;
-  } else if (date.toDateString() === yesterday.toDateString()) {
-    return `Yesterday at ${timeStr}`;
-  } else {
-    return `${date.toLocaleDateString()} at ${timeStr}`;
-  }
+  if (date.toDateString() === now.toDateString()) return `Today at ${timeStr}`;
+  if (date.toDateString() === yesterday.toDateString()) return `Yesterday at ${timeStr}`;
+  return `${date.toLocaleDateString()} at ${timeStr}`;
 };
 
 const getAvatarUrl = (user, cdnUrl) => user?.avatar?._id ? `${cdnUrl}/avatars/${user.avatar._id}` : null;
@@ -176,14 +168,15 @@ const toDateLabel = (value) => {
 // --- Shared Components ---
 
 const Avatar = ({ user, cdnUrl, size = 'md', animateOnHover = false, alwaysAnimate = false }) => {
-  const sizeMap = {
-    sm: 'h-8 w-8 text-xs',
-    md: 'h-10 w-10 text-sm',
-    lg: 'h-12 w-12 text-base',
-  };
+  const sizeMap = { sm: 'h-8 w-8 text-xs', md: 'h-10 w-10 text-sm', lg: 'h-12 w-12 text-base' };
   const initials = (user?.username || '?').slice(0, 2).toUpperCase();
   const [isHovered, setIsHovered] = useState(false);
-  const effectiveAnimate = (alwaysAnimate || (animateOnHover && isHovered)) && !isLowSpec;
+  const [hasError, setHasError] = useState(false);
+
+  // Reset error state if avatar changes
+  useEffect(() => { setHasError(false); }, [user?.avatar?._id]);
+
+  const effectiveAnimate = (alwaysAnimate || (animateOnHover && isHovered)) && !isLowSpec && !hasError;
   const src = (() => {
     if (!user?.avatar?._id) return null;
     return effectiveAnimate ? `${cdnUrl}/avatars/${user.avatar._id}/original` : `${cdnUrl}/avatars/${user.avatar._id}`;
@@ -195,7 +188,14 @@ const Avatar = ({ user, cdnUrl, size = 'md', animateOnHover = false, alwaysAnima
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      {src ? <img alt={user?.username || 'User avatar'} className="block h-full w-full object-cover object-center" src={src} /> : initials}
+      {src ? (
+        <img 
+          alt={user?.username || 'User avatar'} 
+          className="block h-full w-full object-cover object-center" 
+          src={src} 
+          onError={() => { if(effectiveAnimate) setHasError(true); }}
+        />
+      ) : initials}
     </div>
   );
 };
@@ -224,13 +224,13 @@ class AppErrorBoundary extends Component {
 }
 
 const Modal = ({ title, onClose, children }) => (
-  <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm">
-    <div className="w-full max-w-md overflow-hidden rounded-xl border border-[#202225] bg-[#2b2d31] shadow-2xl">
-      <div className="flex items-center justify-between border-b border-[#202225] px-4 py-3">
+  <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm overflow-y-auto">
+    <div className="w-full max-w-lg m-auto rounded-xl border border-[#202225] bg-[#2b2d31] shadow-2xl flex flex-col max-h-[85vh]">
+      <div className="flex shrink-0 items-center justify-between border-b border-[#202225] px-4 py-3">
         <h3 className="text-sm font-bold text-white">{title}</h3>
         <button className="rounded p-1 text-gray-400 hover:bg-[#3a3d42] hover:text-white" onClick={onClose}><X size={16} /></button>
       </div>
-      <div className="space-y-3 p-4">{children}</div>
+      <div className="p-4 overflow-y-auto custom-scrollbar">{children}</div>
     </div>
   </div>
 );
