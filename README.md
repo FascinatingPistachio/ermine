@@ -1,65 +1,111 @@
 # Ermine
 
-Ermine is a Discord-inspired web client for **stoat.chat** with custom branding and a cleaner layout. It is currently **experimental**, known to be **buggy**, and still missing many expected features.
+```{=html}
+<p align="center">
+```
+`<img src="https://github.com/FascinatingPistachio/ermine/blob/main/assets/android-chrome-192x192.png?raw=true" width="96" />`{=html}
+```{=html}
+</p>
+```
+Ermine is a refined, Discord-inspired web client for **stoat.chat**.
 
-## Highlights
+It prioritizes clarity, hierarchy, and composure while preserving core
+Stoat/Revolt functionality.
 
-- **Discord-like shell layout**
-  - Server rail on the left
-  - Channel list sidebar
-  - Main chat timeline + composer
-  - Member list on the right
-- **Ermine branding**
-  - Updated login screen branding and copy
-  - Ermine references in app chrome
-- **Better UX defaults**
-  - Improved spacing, hierarchy, and color consistency
-  - Friend list landing experience for `@me`
-  - Profile popout modal for users/members
-- **Core Stoat/Revolt functionality preserved**
-  - Session login (credentials or token)
-  - Config discovery from API root
-  - Realtime events over websocket
-  - Message sending and timeline updates
+This project is **experimental** and under active development.
+
+------------------------------------------------------------------------
+
+## Interface
+
+-   Structured three-column layout
+    -   Space rail\
+    -   Channel sidebar\
+    -   Timeline + composer\
+    -   Member panel
+-   Focused interaction model
+    -   Reduced visual noise\
+    -   Sharper spacing and hierarchy\
+    -   Controlled color system
+-   Composed system copy
+    -   "Preferences" instead of "User Settings"\
+    -   "Direct" instead of "Friends"\
+    -   "Live" instead of "Active Now"
+
+Familiar structure. Cleaner execution.
+
+------------------------------------------------------------------------
+
+## Functionality
+
+Core Stoat/Revolt capabilities are preserved:
+
+-   Session login (credentials or token)
+-   API root configuration discovery
+-   Realtime events over WebSocket
+-   Message sending and timeline updates
+-   Profile popout modal
+-   `@me` landing experience
+
+------------------------------------------------------------------------
 
 ## Configuration
 
-The client defaults to:
+Default endpoints:
 
-- API: `https://api.stoat.chat`
-- WebSocket: `wss://stoat.chat/events`
-- CDN: `https://autumn.revolt.chat`
+-   API: `https://api.stoat.chat`
+-   WebSocket: `wss://stoat.chat/events`
+-   CDN: `https://autumn.revolt.chat`
 
-You can override these in **Advanced connection settings** on the login screen.
+Connection overrides are available under:
 
-## Local development
+**Advanced connection configuration**
 
-This repository currently contains the main app component at:
+No restart required.
 
-- `src/App.jsx`
+------------------------------------------------------------------------
 
-Use your existing React/Tailwind host setup to run it locally.
+## Local Development
 
-## Brand direction
+Main application entry:
 
-This app is intentionally branded as **Ermine**, designed for the **stoat.chat** ecosystem while keeping a familiar Discord-like interaction model.
+-   `src/App.jsx`
 
+Run using your existing React + Tailwind setup.
 
-## Deploying on Vercel
+------------------------------------------------------------------------
 
-This project includes a `vercel.json` SPA rewrite so deep links resolve correctly to `/` (framework entrypoint) on Vercel, which avoids hard-coding an `index.html` file.
+## Deployment (Vercel)
 
-For environment-specific endpoints, set these Vercel environment variables:
+Includes `vercel.json` SPA rewrite support so deep links resolve to `/`.
 
-- `VITE_STOAT_API_URL`
-- `VITE_STOAT_WS_URL`
-- `VITE_STOAT_CDN_URL`
+Optional environment variables:
 
-The app will use those values at build time, while still allowing manual overrides from **Advanced connection settings** on the login screen.
+-   `VITE_STOAT_API_URL`
+-   `VITE_STOAT_WS_URL`
+-   `VITE_STOAT_CDN_URL`
 
-## Privacy and GDPR direction
+Values are injected at build time. Manual overrides remain available
+from the login screen.
 
-- Ermine stores session details in browser cookies (`ermine_session_token`, `ermine_user_id`, `ermine_api_url`) for authentication continuity.
-- Ermine does not persist personal user data on Ermine repositories or Ermine-hosted servers.
-- Network communication is limited to configured official stoat.chat endpoints.
-- See `privacy-policy.html` for the user-facing privacy notice.
+------------------------------------------------------------------------
+
+## Privacy
+
+-   Session continuity is maintained using browser cookies:
+    -   `ermine_session_token`
+    -   `ermine_user_id`
+    -   `ermine_api_url`
+-   Ermine does not store user content outside configured stoat.chat
+    endpoints.
+-   Network communication is limited to selected API, WebSocket, and CDN
+    endpoints.
+-   See `privacy-policy.html` for the user-facing notice.
+
+------------------------------------------------------------------------
+
+## Direction
+
+Ermine is the composed interface layer for the stoat.chat ecosystem.
+
+Minimal shell. Full control.
