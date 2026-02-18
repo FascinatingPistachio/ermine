@@ -105,7 +105,7 @@ const getRuntimeConfig = () => {
 const { apiUrl: DEFAULT_API_URL, wsUrl: DEFAULT_WS_URL, cdnUrl: DEFAULT_CDN_URL } = getRuntimeConfig();
 
 const inputBase =
-  'w-full rounded-md border border-[#202225] bg-[#111214] px-3 py-2 text-sm text-gray-100 placeholder:text-gray-500 focus:border-[#5865f2] focus:outline-none focus:ring-1 focus:ring-[#5865f2]';
+  'w-full rounded-md border border-[#242A35] bg-[#141821] px-3 py-2 text-sm text-[#E6EDF3] placeholder:text-[#8892A6] focus:border-[#8AB4F8] focus:outline-none focus:ring-1 focus:ring-[#8AB4F8]';
 
 const TOKEN_COOKIE_NAME = 'ermine_session_token';
 const USER_COOKIE_NAME = 'ermine_user_id';
@@ -211,11 +211,11 @@ class AppErrorBoundary extends Component {
   render() {
     if (this.state.hasError) {
       return (
-        <div className="grid min-h-screen place-items-center bg-[#1e1f22] p-6 text-gray-100">
-          <div className="w-full max-w-lg rounded-2xl border border-[#202225] bg-[#2b2d31] p-8 text-center shadow-2xl">
-            <h1 className="mt-3 text-2xl font-bold text-white">Looks like Ermine crashed.</h1>
-            <p className="mt-2 text-sm text-gray-300">Try reloading the app.</p>
-            <button className="mt-6 rounded-md bg-[#5865f2] px-4 py-2 text-sm font-semibold text-white hover:bg-[#4956d8]" onClick={() => window.location.reload()} type="button">Reload Ermine</button>
+        <div className="grid min-h-screen place-items-center bg-[#0F1115] p-6 text-[#E6EDF3]">
+          <div className="w-full max-w-lg rounded-2xl border border-[#242A35] bg-[#171A21] p-8 text-center shadow-2xl">
+            <h1 className="mt-3 text-2xl font-bold text-white">Connection interrupted.</h1>
+            <p className="mt-2 text-sm text-[#A6B0C3]">Attempting recovery requires a reload.</p>
+            <button className="mt-6 rounded-md bg-[#8AB4F8] px-4 py-2 text-sm font-semibold text-[#0F1115] hover:bg-[#6FA6E8]" onClick={() => window.location.reload()} type="button">Reload Ermine</button>
           </div>
         </div>
       );
@@ -226,7 +226,7 @@ class AppErrorBoundary extends Component {
 
 const Modal = ({ title, onClose, children }) => (
   <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm overflow-y-auto">
-    <div className="w-full max-w-lg m-auto rounded-xl border border-[#202225] bg-[#2b2d31] shadow-2xl flex flex-col max-h-[85vh]">
+    <div className="w-full max-w-lg m-auto rounded-xl border border-[#242A35] bg-[#171A21] shadow-2xl flex max-h-[85vh] flex-col animate-[ermineModalIn_140ms_ease-out]">
       <div className="flex shrink-0 items-center justify-between border-b border-[#202225] px-4 py-3">
         <h3 className="text-sm font-bold text-white">{title}</h3>
         <button className="rounded p-1 text-gray-400 hover:bg-[#3a3d42] hover:text-white" onClick={onClose}><X size={16} /></button>
@@ -1068,20 +1068,30 @@ function AppShell() {
   const deleteServer = async () => { if (!selectedServerId || selectedServerId === '@me') return; if (!confirm(`Are you absolutely sure you want to delete ${selectedServer?.name}? This cannot be undone.`)) return; setIsUpdatingServer(true); try { await fetch(`${config.apiUrl}/servers/${selectedServerId}`, { method: 'DELETE', headers: { 'x-session-token': auth.token } }); setActiveModal(null); } catch {} finally { setIsUpdatingServer(false); } };
   const openServerSettings = () => { if (selectedServer) { setEditServerName(selectedServer.name); setActiveModal('server-settings'); } };
 
-  if (view === 'loading') return <div className="grid h-screen place-items-center bg-[#1e1f22] text-[#5865f2]"><Hash className="animate-spin" size={42} /></div>;
+  if (view === 'loading') return <div className="grid h-screen place-items-center bg-[#0F1115] text-[#8AB4F8]"><Hash className="animate-spin" size={42} /></div>;
 
   if (view === 'login') {
     return (
-      <div className="min-h-screen bg-[#1e1f22] px-4 py-10 text-gray-100">
-        <div className="mx-auto max-w-md rounded-2xl border border-[#202225] bg-[#2b2d31] p-8 shadow-2xl">
-          <div className="mb-6 text-center">
-            <div className="mx-auto mb-3 grid h-16 w-16 place-items-center rounded-2xl bg-gradient-to-br from-[#5865f2] to-[#8ea1ff] text-2xl font-extrabold text-white">E</div>
-            <h1 className="text-2xl font-bold text-white">Ermine</h1>
-            <p className="text-sm text-gray-400">Branded stoat.chat client with a Discord-inspired layout.</p>
+      <div className="min-h-screen bg-[#0F1115] px-4 py-10 text-[#E6EDF3]">
+        <div className="relative mx-auto max-w-md rounded-2xl border border-[#242A35] bg-[#171A21] p-8 shadow-2xl">
+          <div className="absolute right-4 top-4">
+            <span className="rounded-full border border-[#242A35] bg-[#141821] px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[#B6D8F6]" title="This client is under active development. Some features may be incomplete.">Experimental Build</span>
           </div>
-          <div className="mb-5 grid grid-cols-2 gap-2 rounded-lg bg-[#1e1f22] p-1 text-xs font-semibold uppercase tracking-wide">
-            <button className={`rounded py-2 ${loginMode === 'credentials' ? 'bg-[#5865f2] text-white' : 'text-gray-400 hover:text-white'}`} onClick={() => setLoginMode('credentials')} type="button">Credentials</button>
-            <button className={`rounded py-2 ${loginMode === 'token' ? 'bg-[#5865f2] text-white' : 'text-gray-400 hover:text-white'}`} onClick={() => setLoginMode('token')} type="button">Token</button>
+          <div className="mb-6 text-center">
+            <div className="mx-auto mb-3 h-16 w-16 overflow-hidden rounded-2xl border border-[#242A35] bg-[#141821]">
+              <img
+                alt="Ermine logo"
+                className="h-full w-full object-cover"
+                src="/assets/android-chrome-192x192.png"
+              />
+            </div>
+            <h1 className="text-2xl font-bold text-white">Ermine</h1>
+            <p className="text-sm text-[#A6B0C3]">A refined client for stoat.chat.</p>
+            <p className="mt-1 text-xs text-[#8892A6]">Clean layout. Familiar flow. Experimental build.</p>
+          </div>
+          <div className="mb-5 grid grid-cols-2 gap-2 rounded-lg bg-[#141821] p-1 text-xs font-semibold uppercase tracking-wide">
+            <button className={`rounded py-2 ${loginMode === 'credentials' ? 'bg-[#8AB4F8] text-[#0F1115]' : 'text-gray-400 hover:text-white'}`} onClick={() => setLoginMode('credentials')} type="button">Credentials</button>
+            <button className={`rounded py-2 ${loginMode === 'token' ? 'bg-[#8AB4F8] text-[#0F1115]' : 'text-gray-400 hover:text-white'}`} onClick={() => setLoginMode('token')} type="button">Token</button>
           </div>
           <form className="space-y-4" onSubmit={handleLogin}>
             {loginMode === 'credentials' ? (
@@ -1093,17 +1103,17 @@ function AppShell() {
             ) : (
               <textarea className={`${inputBase} h-24 resize-none`} onChange={(e) => setManualToken(e.target.value)} placeholder="Paste session token" value={manualToken} />
             )}
-            <label className="flex items-start gap-2 rounded-md border border-[#2f3237] bg-[#1e1f22] p-2 text-xs text-gray-300">
+            <label className="flex items-start gap-2 rounded-md border border-[#242A35] bg-[#141821] p-2 text-xs text-[#A6B0C3]">
               <input checked={privacyConsent} className="mt-0.5" onChange={(e) => setPrivacyConsent(e.target.checked)} type="checkbox" />
-              <span>I agree to the <a className="text-[#8ea1ff] underline hover:text-[#bdc3ff]" href="/privacy-policy.html" rel="noreferrer" target="_blank">privacy policy</a>. Ermine stores only my session token in a cookie.</span>
+              <span>I agree to the <a className="text-[#B6D8F6] underline hover:text-[#E6F0FF]" href="/privacy-policy.html" rel="noreferrer" target="_blank">privacy policy</a>. Ermine does not store user content outside configured stoat.chat endpoints.</span>
             </label>
             {loginError ? <div className="flex items-start gap-2 rounded-md border border-red-800 bg-red-900/30 p-2 text-sm text-red-200"><AlertCircle className="mt-0.5" size={15} /><span>{loginError}</span></div> : null}
-            <button className="w-full rounded-md bg-[#5865f2] py-2.5 text-sm font-semibold text-white hover:bg-[#4956d8]" disabled={isLoggingIn} type="submit">{isLoggingIn ? 'Signing in…' : 'Log in to Ermine'}</button>
+            <button className="w-full rounded-md bg-[#8AB4F8] py-2.5 text-sm font-semibold text-[#0F1115] hover:bg-[#6FA6E8]" disabled={isLoggingIn} type="submit">{isLoggingIn ? 'Signing in…' : 'Log in to Ermine'}</button>
           </form>
           <div className="mt-5 border-t border-[#202225] pt-4">
-            <button className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200" onClick={() => setShowAdvanced((prev) => !prev)} type="button"><Settings size={12} /> Advanced connection settings</button>
+            <button className="flex items-center gap-1 text-xs text-[#A6B0C3] hover:text-[#E6EDF3]" onClick={() => setShowAdvanced((prev) => !prev)} type="button"><Settings size={12} /> Advanced connection configuration</button>
             {showAdvanced ? (
-              <div className="mt-2 space-y-2 rounded-md bg-[#1e1f22] p-2">
+              <div className="mt-2 space-y-2 rounded-md bg-[#141821] p-2">
                 <input className={inputBase} onChange={(e) => setConfig((prev) => ({ ...prev, apiUrl: e.target.value }))} placeholder="API URL" value={config.apiUrl} />
                 <input className={inputBase} onChange={(e) => setConfig((prev) => ({ ...prev, wsUrl: e.target.value }))} placeholder="WS URL" value={config.wsUrl} />
                 <input className={inputBase} onChange={(e) => setConfig((prev) => ({ ...prev, cdnUrl: e.target.value }))} placeholder="CDN URL" value={config.cdnUrl} />
@@ -1116,29 +1126,29 @@ function AppShell() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#1e1f22] text-gray-100">
+    <div className="flex h-screen overflow-hidden bg-[#0F1115] text-[#E6EDF3]">
       {activeModal === 'create-server' ? (
-        <Modal onClose={() => setActiveModal(null)} title="Create a server">
-          <input className={inputBase} onChange={(e) => setCreateServerName(e.target.value)} placeholder="Server name" value={createServerName} />
-          <button className="w-full rounded-md bg-[#3ba55d] py-2 text-sm font-semibold text-white hover:bg-[#328a4f]" onClick={createServer}>Create server</button>
+        <Modal onClose={() => setActiveModal(null)} title="Create a Space">
+          <input className={inputBase} onChange={(e) => setCreateServerName(e.target.value)} placeholder="Space name" value={createServerName} />
+          <button className="w-full rounded-md bg-[#3ba55d] py-2 text-sm font-semibold text-white hover:bg-[#328a4f]" onClick={createServer}>Create Space</button>
         </Modal>
       ) : null}
       
       {activeModal === 'server-settings' && selectedServer ? (
-        <Modal onClose={() => setActiveModal(null)} title="Server Settings">
+        <Modal onClose={() => setActiveModal(null)} title="Space Settings">
           <div className="space-y-4">
              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Server Name</label>
+                <label className="block text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Space Name</label>
                 <div className="flex gap-2">
-                   <input className={inputBase} onChange={(e) => setEditServerName(e.target.value)} value={editServerName} placeholder="Enter server name" />
+                   <input className={inputBase} onChange={(e) => setEditServerName(e.target.value)} value={editServerName} placeholder="Enter space name" />
                    <button onClick={updateServer} disabled={isUpdatingServer || !editServerName.trim()} className="rounded bg-[#5865f2] px-3 text-white hover:bg-[#4956d8] disabled:opacity-50"><Save size={18} /></button>
                 </div>
              </div>
              <div className="border-t border-[#202225] pt-4 mt-4">
                 <h4 className="text-xs font-bold text-red-400 uppercase tracking-wide mb-2">Danger Zone</h4>
                 <div className="flex items-center justify-between rounded border border-red-900/50 p-3 bg-red-900/10">
-                   <div><div className="font-semibold text-white">Delete Server</div><div className="text-xs text-gray-400">Permanently remove this server and all its contents.</div></div>
-                   <button onClick={deleteServer} disabled={isUpdatingServer} className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-sm font-semibold transition-colors">Delete Server</button>
+                   <div><div className="font-semibold text-white">Delete Space</div><div className="text-xs text-gray-400">Permanently remove this space and all its contents.</div></div>
+                   <button onClick={deleteServer} disabled={isUpdatingServer} className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-sm font-semibold transition-colors">Delete Space</button>
                 </div>
              </div>
           </div>
@@ -1146,7 +1156,7 @@ function AppShell() {
       ) : null}
       
       {activeModal === 'discovery' ? (
-        <Modal onClose={() => setActiveModal(null)} title="Server Discovery">
+        <Modal onClose={() => setActiveModal(null)} title="Space Discovery">
            <div className="p-4 text-center">
               <Search size={48} className="mx-auto text-green-500 mb-4" />
               <h3 className="text-lg font-bold text-white mb-2">Explore Communities</h3>
@@ -1176,7 +1186,7 @@ function AppShell() {
       ) : null}
 
       {activeModal === 'user-settings' ? (
-        <Modal onClose={() => setActiveModal(null)} title="User Settings">
+        <Modal onClose={() => setActiveModal(null)} title="Preferences">
            <div className="space-y-6">
               <div className="flex flex-col items-center">
                  <div className="w-full h-24 rounded-t-lg bg-gray-700 overflow-hidden relative">
@@ -1230,7 +1240,7 @@ function AppShell() {
           <div className="rounded-md bg-[#1e1f22] p-3 text-sm text-gray-200">
             <p className="text-xs uppercase tracking-wide text-gray-500">Do you trust this link?</p>
             <p className="mt-2 break-all text-[#bdc3ff]">{linkPromptUrl}</p>
-            <p className="mt-2 text-xs text-gray-400">Ermine says: only open links from people and servers you trust.</p>
+            <p className="mt-2 text-xs text-gray-400">Only open links from contacts and spaces you trust.</p>
           </div>
           <div className="grid grid-cols-2 gap-2">
             <button className="rounded-md bg-[#3a3d42] py-2 text-sm font-semibold text-gray-200 hover:bg-[#4a4d55]" onClick={() => setLinkPromptUrl(null)} type="button">Cancel</button>
@@ -1253,7 +1263,7 @@ function AppShell() {
           </div>
           <div className="grid grid-cols-1 gap-2 rounded-md bg-[#1e1f22] p-3 text-xs text-gray-300">
             <p><span className="font-semibold text-gray-100">Joined platform:</span> {toDateLabel(peekPlatformJoined)}</p>
-            <p><span className="font-semibold text-gray-100">Joined server:</span> {selectedServerId === '@me' ? 'N/A' : toDateLabel(peekServerJoined)}</p>
+            <p><span className="font-semibold text-gray-100">Joined space:</span> {selectedServerId === '@me' ? 'N/A' : toDateLabel(peekServerJoined)}</p>
           </div>
           <div className="space-y-1 rounded-md bg-[#1e1f22] p-3">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">About me</p>
@@ -1265,7 +1275,7 @@ function AppShell() {
           </div>
           <div className="space-y-1 rounded-md bg-[#1e1f22] p-3">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Roles</p>
-            {peekRoles.length ? <div className="flex flex-wrap gap-1.5">{peekRoles.map((role) => <span className="rounded bg-[#3a3d42] px-2 py-1 text-xs text-gray-200" key={role.name}>{role.name}</span>)}</div> : <p className="text-xs text-gray-400">No server roles</p>}
+            {peekRoles.length ? <div className="flex flex-wrap gap-1.5">{peekRoles.map((role) => <span className="rounded bg-[#3a3d42] px-2 py-1 text-xs text-gray-200" key={role.name}>{role.name}</span>)}</div> : <p className="text-xs text-gray-400">No space roles</p>}
           </div>
         </Modal>
       ) : null}
@@ -1290,19 +1300,19 @@ function AppShell() {
         <button className="grid h-12 w-12 place-items-center rounded-full bg-[#313338] text-[#3ba55d] transition hover:rounded-2xl hover:bg-[#3ba55d] hover:text-white" onClick={() => setActiveModal('create-server')}>
           <Plus size={20} />
         </button>
-        <button className="grid h-12 w-12 place-items-center rounded-full bg-[#313338] text-green-500 transition hover:rounded-2xl hover:bg-green-600 hover:text-white" onClick={() => setActiveModal('discovery')} title="Server Discovery">
+        <button className="grid h-12 w-12 place-items-center rounded-full bg-[#313338] text-green-500 transition hover:rounded-2xl hover:bg-green-600 hover:text-white" onClick={() => setActiveModal('discovery')} title="Space Discovery">
            <Search size={20} />
         </button>
       </aside>
 
       <aside className="hidden w-60 flex-col bg-[#2b2d31] md:flex">
         <div className="border-b border-[#202225] px-4 py-3 flex justify-between items-center">
-          <div className="truncate text-sm font-bold text-white">{selectedServerId === '@me' ? 'Ermine Home' : servers[selectedServerId]?.name || 'Server'}</div>
+          <div className="truncate text-sm font-bold text-white">{selectedServerId === '@me' ? 'Live' : servers[selectedServerId]?.name || 'Space'}</div>
           {isServerOwner && selectedServerId !== '@me' && (
              <button 
                onClick={openServerSettings} 
                className="text-gray-400 hover:text-white transition-colors" 
-               title="Server Settings"
+               title="Space Settings"
              >
                 <Settings size={16} />
              </button>
@@ -1312,7 +1322,7 @@ function AppShell() {
           {selectedServerId === '@me' ? (
             <>
               <button className={`mb-1 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${selectedChannelId === 'friends' ? 'bg-[#404249] text-white' : 'text-gray-400 hover:bg-[#35373c] hover:text-white'}`} onClick={() => handleChannelSelect('friends')}>
-                <Users size={16} /> Friends
+                <Users size={16} /> <span>Direct</span>
               </button>
               {directMessageChannels.map((channel) => {
                 const recipientId = (channel.recipients || []).find((id) => id !== auth.userId);
@@ -1354,7 +1364,7 @@ function AppShell() {
               </div>
             </button>
             <div className="flex items-center gap-1">
-              <button className="rounded p-1 text-gray-400 hover:bg-[#35373c] hover:text-white" onClick={() => setActiveModal('user-settings')} title="User settings" type="button">
+              <button className="rounded p-1 text-gray-400 hover:bg-[#35373c] hover:text-white" onClick={() => setActiveModal('user-settings')} title="Preferences" type="button">
                 <Settings size={14} />
               </button>
               <button className="rounded p-1 text-gray-400 hover:bg-[#35373c] hover:text-white" onClick={logout} title="Logout" type="button">
@@ -1371,7 +1381,7 @@ function AppShell() {
             {channels[selectedChannelId]?.channel_type === 'DirectMessage' ? <MessageSquare size={17} className="text-gray-400" /> : <Hash size={17} className="text-gray-400" />}
             <span>{currentChannelName}</span>
           </div>
-          <div className="text-xs text-gray-400">Ermine for stoat.chat</div>
+          <div className="text-xs text-gray-400">Stoat.chat, distilled.</div>
         </header>
 
         {voiceNotice ? (
@@ -1383,14 +1393,14 @@ function AppShell() {
         <section className="flex-1 overflow-y-auto py-2" ref={messagesContainerRef}>
           {selectedChannelId === 'friends' ? (
             <div className="space-y-2 p-4">
-              <h2 className="text-xs font-bold uppercase tracking-wide text-gray-400">Friends ({friends.length})</h2>
-              {friends.length === 0 ? <p className="text-sm text-gray-400">No friends available yet.</p> : null}
+              <h2 className="text-xs font-bold uppercase tracking-wide text-gray-400">Direct ({friends.length})</h2>
+              {friends.length === 0 ? <p className="text-sm text-gray-400">No direct contacts available yet.</p> : null}
               {friends.map((friend) => (
                 <button className="flex w-full items-center gap-3 rounded bg-[#2b2d31] p-3 text-left hover:bg-[#35373c]" key={friend._id} onClick={() => openDmWithUser(friend._id)}>
                   <Avatar animateOnHover cdnUrl={config.cdnUrl} user={friend} />
                   <div className="min-w-0">
                     <div className="truncate text-sm font-semibold text-white">{friend.username}</div>
-                    <div className="text-xs text-gray-400">Direct message</div>
+                    <div className="text-xs text-gray-400">Direct</div>
                   </div>
                 </button>
               ))}
@@ -1479,7 +1489,7 @@ function AppShell() {
                 <div ref={pickerRef} onMouseLeave={() => setShowEmojiPicker(false)} className="absolute bottom-12 left-0 z-20 w-72 rounded-lg border border-[#4c4f56] bg-[#232428] p-2 shadow-2xl max-h-64 overflow-y-auto">
                   <p className="mb-2 px-1 text-[10px] uppercase tracking-wide text-gray-500 font-bold sticky top-0 bg-[#232428] z-10">Standard</p>
                   <div className="grid grid-cols-8 gap-1 mb-2">{STANDARD_EMOJIS.map((emoji) => <button className="rounded p-1 text-lg hover:bg-[#3a3d42]" key={emoji} onClick={() => addEmojiToComposer(emoji)} type="button">{renderTwemoji(emoji, "w-6 h-6 inline-block")}</button>)}</div>
-                  {allCustomEmojis.length > 0 ? <><p className="mb-2 px-1 text-[10px] uppercase tracking-wide text-gray-500 font-bold sticky top-0 bg-[#232428] z-10">Server Emojis</p><div className="grid grid-cols-8 gap-1">{allCustomEmojis.map((emoji) => <button className="grid h-8 place-items-center rounded hover:bg-[#3a3d42]" key={emoji.id} onClick={() => addCustomEmojiToComposer(emoji.id)} title={`${emoji.name} from ${emoji.serverName}`} type="button">{renderEmojiVisual(`:${emoji.id}:`, { id: emoji.id, name: emoji.name }, config.cdnUrl)}</button>)}</div></> : null}
+                  {allCustomEmojis.length > 0 ? <><p className="mb-2 px-1 text-[10px] uppercase tracking-wide text-gray-500 font-bold sticky top-0 bg-[#232428] z-10">Space Emojis</p><div className="grid grid-cols-8 gap-1">{allCustomEmojis.map((emoji) => <button className="grid h-8 place-items-center rounded hover:bg-[#3a3d42]" key={emoji.id} onClick={() => addCustomEmojiToComposer(emoji.id)} title={`${emoji.name} from ${emoji.serverName}`} type="button">{renderEmojiVisual(`:${emoji.id}:`, { id: emoji.id, name: emoji.name }, config.cdnUrl)}</button>)}</div></> : null}
                 </div>
               ) : null}
             </div>
