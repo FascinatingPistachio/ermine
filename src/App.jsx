@@ -1292,7 +1292,7 @@ function AppShell() {
 
           return (
             <button className={`grid h-12 w-12 place-items-center overflow-hidden transition ${active ? 'rounded-2xl bg-[#5865f2]' : 'rounded-full bg-[#313338] hover:rounded-2xl hover:bg-[#5865f2]'}`} key={server._id} onClick={() => handleServerSelect(server._id)} title={server.name}>
-              {icon ? <img alt={server.name} className="h-full w-full object-cover" src={icon} /> : <span className="text-sm font-bold">{server.name.slice(0, 2).toUpperCase()}</span>}
+              {icon ? <img alt={server.name} className="h-full w-full object-contain p-1" src={icon} /> : <span className="text-sm font-bold">{server.name.slice(0, 2).toUpperCase()}</span>}
             </button>
           );
         })}
