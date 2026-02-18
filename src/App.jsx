@@ -380,7 +380,7 @@ const renderMessageContent = (content, users, channels, onUserClick, customEmoji
     if (userMention) {
       const userId = userMention[1];
       const user = users[userId];
-      return <button className="mx-0.5 inline rounded bg-[#5865f2]/25 px-1 text-[#bdc3ff] hover:bg-[#5865f2]/35" key={`${part}-${index}`} onClick={() => onUserClick(user || { _id: userId, username: 'Unknown user' }, userId)}>@{user?.username || 'unknown'}</button>;
+      return <button className="mx-0.5 inline rounded bg-[#5865f2]/25 px-1 text-[#bdc3ff] hover:bg-[#5865f2]/35" key={`${part}-${index}`} onClick={() => onUserClick(user || { _id: userId, username: 'Loading user…', _loading: true }, userId)}>@{user?.username || 'loading-user'}</button>;
     }
     const channelMention = part.match(/^<#([A-Za-z0-9]+)>$/);
     if (channelMention) return <span className="mx-0.5 inline rounded bg-[#3f4249] px-1 text-gray-100" key={`${part}-${index}`}>#{channels[channelMention[1]]?.name || 'unknown-channel'}</span>;
@@ -472,7 +472,7 @@ const Message = memo(({
   onEditMessage, onDeleteMessage, replyMessageMap
 }) => {
   const authorId = typeof message.author === 'string' ? message.author : message.author?._id;
-  const author = users[authorId] || (typeof message.author === 'object' ? message.author : null) || { username: 'Unknown user' };
+  const author = users[authorId] || (typeof message.author === 'object' ? message.author : null) || { _id: authorId, username: 'Loading user…', _loading: true };
   const mine = me === authorId;
   const messageReactions = toReactionEntries(message.reactions);
   
@@ -556,7 +556,7 @@ const Message = memo(({
             type="button"
           >
             <Reply size={12} />
-            <span className="truncate">Replying to {replyUser?.username || 'Unknown user'}: {fullReplyMessage?.content || message.replyMessage?.content || 'Attachment / embed'}</span>
+            <span className="truncate">Replying to {replyUser?.username || 'Loading user…'}: {fullReplyMessage?.content || message.replyMessage?.content || 'Attachment / embed'}</span>
           </button>
         ) : null}
         
@@ -683,7 +683,7 @@ function AppShell() {
   // Define openUserProfile callback first since it is used in other helpers
   const openUserProfile = useCallback((user, fallbackId = null) => {
     const stableId = user?._id || fallbackId || 'unknown-user';
-    setPeekUser({ ...user, _id: stableId, username: user?.username || 'Unknown user', discriminator: user?.discriminator || '0000' });
+    setPeekUser({ ...user, _id: stableId, username: user?.username || 'Loading user…', discriminator: user?.discriminator || '0000' });
   }, []);
 
   const [servers, setServers] = useState({});
@@ -766,12 +766,18 @@ function AppShell() {
   const renderMemberItem = useCallback((item) => {
     if (item.type === 'header') return <div className="pt-4 pb-1 px-4 text-xs font-bold uppercase tracking-wide text-gray-400 flex items-center gap-1">{item.name} — {item.count}</div>;
     const member = item.data;
+    const memberUser = member.user || { _id: member?._id?.user, username: 'Loading user…', _loading: true };
+    const isUserLoading = !member.user;
     return (
-      <button className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-[#35373c]" onClick={() => openUserProfile(member.user, member._id.user)}>
-        <Avatar animateOnHover cdnUrl={config.cdnUrl} size="sm" user={member.user} />
-        <div className="min-w-0">
-          <div className="truncate text-sm font-medium" style={{ color: member.color || '#f2f3f5' }}>{member.nickname || member.user.username}</div>
-          <div className="flex items-center gap-1 text-[11px] text-gray-500"><User size={11} /> {member.user.status?.presence || 'Offline'}</div>
+      <button className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-[#35373c]" onClick={() => openUserProfile(memberUser, member._id.user)}>
+        <Avatar animateOnHover cdnUrl={config.cdnUrl} size="sm" user={memberUser} />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium" style={{ color: member.color || '#f2f3f5' }}>{member.nickname || memberUser.username}</div>
+          {isUserLoading ? (
+            <div className="mt-1 h-1.5 w-24 overflow-hidden rounded-full bg-[#242A35]"><div className="h-full w-1/2 animate-pulse rounded-full bg-[#8AB4F8]" /></div>
+          ) : (
+            <div className="flex items-center gap-1 text-[11px] text-gray-500"><User size={11} /> {memberUser.status?.presence || 'Offline'}</div>
+          )}
         </div>
       </button>
     );
@@ -1256,7 +1262,7 @@ function AppShell() {
             <div className="flex items-center gap-3 p-3">
               <Avatar alwaysAnimate cdnUrl={config.cdnUrl} size="lg" user={peekUser} />
               <div>
-                <div className="text-base font-semibold text-white">{peekUser?.username || 'Unknown user'}</div>
+                <div className="text-base font-semibold text-white">{peekUser?.username || 'Loading user…'}</div>
                 <div className="text-xs text-gray-400">#{peekUser?.discriminator || '0000'}</div>
               </div>
             </div>
@@ -1327,7 +1333,7 @@ function AppShell() {
               {directMessageChannels.map((channel) => {
                 const recipientId = (channel.recipients || []).find((id) => id !== auth.userId);
                 const recipient = users[recipientId];
-                const label = recipient?.username || channel.name || 'Direct Message';
+                const label = recipient?.username || channel.name || 'Loading direct…';
                 return (
                   <button className={`mb-0.5 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${selectedChannelId === channel._id ? 'bg-[#404249] text-white' : 'text-gray-400 hover:bg-[#35373c] hover:text-white'}`} key={channel._id} onClick={() => handleChannelSelect(channel._id)}>
                     <MessageSquare size={16} />
@@ -1444,7 +1450,7 @@ function AppShell() {
           {activeReply ? (
             <div className="mb-2 flex items-center justify-between gap-2 rounded-md bg-[#2b2d31] px-3 py-2 text-xs text-gray-300">
               <span className="truncate">
-                Replying to {users[typeof activeReply.author === 'string' ? activeReply.author : activeReply.author?._id]?.username || 'Unknown user'}: {activeReply.content || 'Attachment / embed'}
+                Replying to {users[typeof activeReply.author === 'string' ? activeReply.author : activeReply.author?._id]?.username || 'Loading user…'}: {activeReply.content || 'Attachment / embed'}
               </span>
               <button className="rounded p-1 text-gray-400 hover:bg-[#3a3d42] hover:text-white" onClick={() => setReplyingTo(null)} type="button">
                 <X size={13} />
@@ -1514,7 +1520,10 @@ function AppShell() {
       </main>
 
       <aside className="hidden w-60 flex-col border-l border-[#202225] bg-[#2b2d31] lg:flex">
-        <div className="border-b border-[#202225] px-4 py-3 text-xs font-bold uppercase tracking-wide text-gray-400">Members — {allCurrentMembers.length}{isMembersLoading ? ' (loading...)' : ''}</div>
+        <div className="border-b border-[#202225] px-4 py-3 text-xs font-bold uppercase tracking-wide text-gray-400">
+          <div>Members — {allCurrentMembers.length}</div>
+          {isMembersLoading ? <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[#242A35]"><div className="h-full w-1/3 animate-pulse rounded-full bg-[#8AB4F8]" /></div> : null}
+        </div>
         <div className="min-h-0 flex-1 relative">
           <VirtualList items={memberListItems} itemHeight={40} className="h-full w-full" renderItem={renderMemberItem} />
         </div>
