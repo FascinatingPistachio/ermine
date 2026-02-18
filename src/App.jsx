@@ -1081,12 +1081,8 @@ function AppShell() {
             <div className="mx-auto mb-3 h-16 w-16 overflow-hidden rounded-2xl border border-[#242A35] bg-[#141821]">
               <img
                 alt="Ermine logo"
-                className="h-full w-full object-contain p-1"
-                src="https://github.com/FascinatingPistachio/ermine/blob/main/assets/android-chrome-192x192.png?raw=true"
-                srcSet="https://github.com/FascinatingPistachio/ermine/blob/main/assets/android-chrome-192x192.png?raw=true 1x, https://github.com/FascinatingPistachio/ermine/blob/main/assets/android-chrome-512x512.png?raw=true 2x"
-                loading="eager"
-                decoding="async"
-                referrerPolicy="no-referrer"
+                className="h-full w-full object-cover"
+                src="/assets/android-chrome-192x192.png"
               />
             </div>
             <h1 className="text-2xl font-bold text-white">Ermine</h1>
