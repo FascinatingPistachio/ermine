@@ -14,7 +14,7 @@
 
 Ermine is a refined, Discord-inspired web client for **stoat.chat**.
 
-It prioritizes clarity, hierarchy, and composure while preserving core Stoat/Revolt functionality.
+It prioritizes clarity, hierarchy, and a cleaner interaction model while preserving core Stoat/Revolt functionality.
 
 This project is **experimental** and under active development.
 
@@ -116,6 +116,6 @@ Values are injected at build time. Manual overrides remain available from the lo
 
 ## Direction
 
-Ermine is the composed interface layer for the stoat.chat ecosystem.
+Ermine is the composed, winter-coated interface layer for the stoat.chat ecosystem — familiar in structure, sharper in execution.
 
-**Minimal shell. Full control.**
+**Stoat.chat, distilled.**
