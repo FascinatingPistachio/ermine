@@ -1078,7 +1078,13 @@ function AppShell() {
             <span className="rounded-full border border-[#242A35] bg-[#141821] px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[#B6D8F6]" title="This client is under active development. Some features may be incomplete.">Experimental Build</span>
           </div>
           <div className="mb-6 text-center">
-            <div className="mx-auto mb-3 grid h-16 w-16 place-items-center rounded-2xl border border-[#242A35] bg-[#141821] text-2xl font-semibold tracking-[0.22em] text-[#E6EDF3]">E</div>
+            <div className="mx-auto mb-3 h-16 w-16 overflow-hidden rounded-2xl border border-[#242A35] bg-[#141821]">
+              <img
+                alt="Ermine logo"
+                className="h-full w-full object-cover"
+                src="/assets/android-chrome-192x192.png"
+              />
+            </div>
             <h1 className="text-2xl font-bold text-white">Ermine</h1>
             <p className="text-sm text-[#A6B0C3]">A refined client for stoat.chat.</p>
             <p className="mt-1 text-xs text-[#8892A6]">Clean layout. Familiar flow. Experimental build.</p>
