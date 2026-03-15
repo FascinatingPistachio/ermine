@@ -3,6 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Ermine — a refined client for stoat.chat." />
+    <meta name="theme-color" content="#0F1115" />
     <title>Ermine</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230F1115'/%3E%3Cpath d='M18 16h28v8H28v8h14v8H28v8h18v8H18V16z' fill='%23E6EDF3'/%3E%3C/svg%3E" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -36,19 +38,39 @@
       }
 
       @keyframes ermineModalIn {
-        from {
-          opacity: 0;
-          transform: translateY(4px);
-        }
-        to {
-          opacity: 1;
-          transform: translateY(0);
-        }
+        from { opacity: 0; transform: translateY(6px) scale(0.98); }
+        to   { opacity: 1; transform: translateY(0) scale(1); }
       }
 
-      #root {
-        min-height: 100vh;
+      @keyframes ermineSlideDown {
+        from { opacity: 0; transform: translateY(-4px); }
+        to   { opacity: 1; transform: translateY(0); }
       }
+
+      @keyframes ermineSpinSlow {
+        to { transform: rotate(360deg); }
+      }
+
+      #root { min-height: 100vh; }
+
+      /* ── Scrollbars ── */
+      ::-webkit-scrollbar              { width: 6px; height: 6px; }
+      ::-webkit-scrollbar-track        { background: transparent; }
+      ::-webkit-scrollbar-thumb        { background: #3f4249; border-radius: 3px; }
+      ::-webkit-scrollbar-thumb:hover  { background: #5c606a; }
+      * { scrollbar-width: thin; scrollbar-color: #3f4249 transparent; }
+
+      /* ── Textarea auto-resize ── */
+      .composer-textarea {
+        field-sizing: content;   /* Chrome 123+ native */
+        max-height: 200px;
+        overflow-y: auto;
+        line-height: 1.4;
+      }
+
+      /* ── Reaction button transitions ── */
+      .reaction-btn { transition: transform 80ms ease, background-color 80ms ease; }
+      .reaction-btn:active { transform: scale(0.88); }
     </style>
   </head>
   <body>
