@@ -1,838 +1,616 @@
-import React, { useEffect, useMemo, useRef, useState, useCallback, memo, Component } from 'react';
+import React, {
+  useEffect, useMemo, useRef, useState,
+  useCallback, memo, Component,
+} from 'react';
 import {
-  AlertCircle,
-  Circle,
-  EyeOff,
-  Hash,
-  LogOut,
-  Menu,
-  MessageSquare,
-  Moon,
-  MinusCircle,
-  Plus,
-  Paperclip,
-  Reply,
-  Send,
-  Settings,
-  ShieldCheck,
-  Smile,
-  User,
-  Users,
-  X,
-  Trash2,
-  Edit2,
-  Save,
-  Search,
-  Loader,
+  AlertCircle, Bell, BellOff, BookOpen, ChevronDown, ChevronRight,
+  Circle, EyeOff, Hash, Link, LogOut, Menu, MessageSquare, Moon,
+  MinusCircle, Plus, Paperclip, Pin, Reply, Send, Settings,
+  ShieldCheck, Smile, User, Users, UserPlus, UserCheck, UserX,
+  X, Trash2, Edit2, Save, Search, Loader, Copy, Check,
 } from 'lucide-react';
 
-// ─── ULID → timestamp ────────────────────────────────────────────────────────
+// ─── ULID ─────────────────────────────────────────────────────────────────────
 const ENCODING = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
-const DECODE_LOOKUP = {};
-for (let i = 0; i < ENCODING.length; i++) DECODE_LOOKUP[ENCODING[i]] = i;
-
+const DEC = {};
+for (let i = 0; i < ENCODING.length; i++) DEC[ENCODING[i]] = i;
 const ulidToMillis = (id) => {
   if (typeof id !== 'string' || id.length !== 26) return Date.now();
-  const timePart = id.substring(0, 10).toUpperCase();
-  let time = 0;
-  for (let i = 0; i < 10; i++) time = time * 32 + (DECODE_LOOKUP[timePart[i]] || 0);
-  return time;
+  let t = 0;
+  for (let i = 0; i < 10; i++) t = t * 32 + (DEC[id[i].toUpperCase()] || 0);
+  return t;
 };
+const ulidToDate = (id) => new Date(ulidToMillis(id));
 
-// ─── Low-spec detection ───────────────────────────────────────────────────────
+// ─── Low-spec guard ───────────────────────────────────────────────────────────
 const isLowSpec =
   typeof navigator !== 'undefined' &&
-  (/Nintendo WiiU/i.test(navigator.userAgent) ||
-    /Nintendo 3DS/i.test(navigator.userAgent) ||
-    /PlayStation/i.test(navigator.userAgent) ||
+  (/Nintendo WiiU|Nintendo 3DS|PlayStation/i.test(navigator.userAgent) ||
     (typeof window.matchMedia === 'function' &&
       window.matchMedia('(prefers-reduced-motion: reduce)').matches));
 
-// ─── Twemoji ─────────────────────────────────────────────────────────────────
-const TWEMOJI_BASE = 'https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/';
-
-const toCodePoint = (unicodeSurrogates) => {
-  const r = [];
-  let c = 0, p = 0, i = 0;
-  while (i < unicodeSurrogates.length) {
-    c = unicodeSurrogates.charCodeAt(i++);
-    if (p) {
-      r.push((0x10000 + ((p - 0xd800) << 10) + (c - 0xdc00)).toString(16));
-      p = 0;
-    } else if (0xd800 <= c && c <= 0xdbff) {
-      p = c;
-    } else {
-      r.push(c.toString(16));
-    }
+// ─── Twemoji ──────────────────────────────────────────────────────────────────
+const TW = 'https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/';
+const toCP = (s) => {
+  const r = []; let c = 0, p = 0, i = 0;
+  while (i < s.length) {
+    c = s.charCodeAt(i++);
+    if (p) { r.push((0x10000 + ((p - 0xd800) << 10) + (c - 0xdc00)).toString(16)); p = 0; }
+    else if (0xd800 <= c && c <= 0xdbff) p = c;
+    else r.push(c.toString(16));
   }
   return r.join('-');
 };
-
-const renderTwemoji = (text, className = 'inline-block w-5 h-5 align-bottom') => {
+const renderTwemoji = (text, cls = 'inline-block w-5 h-5 align-bottom') => {
   if (!text) return null;
-  return text.split(/([\uD800-\uDBFF][\uDC00-\uDFFF])/g).map((part, index) => {
-    if (/[\uD800-\uDBFF][\uDC00-\uDFFF]/.test(part)) {
-      const cp = toCodePoint(part);
-      return (
-        <img
-          key={index}
-          src={`${TWEMOJI_BASE}${cp}.png`}
-          alt={part}
-          className={className}
-          draggable={false}
-          onError={(e) => { e.currentTarget.style.display = 'none'; }}
-        />
-      );
-    }
-    return part;
-  });
+  return text.split(/([\uD800-\uDBFF][\uDC00-\uDFFF])/g).map((p, i) =>
+    /[\uD800-\uDBFF][\uDC00-\uDFFF]/.test(p)
+      ? <img key={i} src={`${TW}${toCP(p)}.png`} alt={p} className={cls} draggable={false} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+      : p
+  );
 };
 
-// ─── Config ──────────────────────────────────────────────────────────────────
+// ─── Config ───────────────────────────────────────────────────────────────────
 const getRuntimeConfig = () => {
-  const runtime = typeof window !== 'undefined' ? window.__ERMINE_CONFIG__ || {} : {};
-  // Support Vite build-time env vars (injected via vite.config.js define)
-  const buildApiUrl = typeof __ERMINE_API_URL__ !== 'undefined' ? __ERMINE_API_URL__ : '';
-  const buildWsUrl  = typeof __ERMINE_WS_URL__  !== 'undefined' ? __ERMINE_WS_URL__  : '';
-  const buildCdnUrl = typeof __ERMINE_CDN_URL__ !== 'undefined' ? __ERMINE_CDN_URL__ : '';
+  const r = typeof window !== 'undefined' ? window.__ERMINE_CONFIG__ || {} : {};
+  const bApi = typeof __ERMINE_API_URL__ !== 'undefined' ? __ERMINE_API_URL__ : '';
+  const bWs  = typeof __ERMINE_WS_URL__  !== 'undefined' ? __ERMINE_WS_URL__  : '';
+  const bCdn = typeof __ERMINE_CDN_URL__ !== 'undefined' ? __ERMINE_CDN_URL__ : '';
   return {
-    apiUrl: runtime.apiUrl || buildApiUrl || 'https://api.stoat.chat',
-    wsUrl:  runtime.wsUrl  || buildWsUrl  || 'wss://stoat.chat/events',
-    cdnUrl: runtime.cdnUrl || buildCdnUrl || 'https://cdn.stoatusercontent.com',
+    apiUrl: r.apiUrl || bApi || 'https://api.stoat.chat',
+    wsUrl:  r.wsUrl  || bWs  || 'wss://stoat.chat/events',
+    cdnUrl: r.cdnUrl || bCdn || 'https://cdn.stoatusercontent.com',
   };
 };
+const { apiUrl: DEF_API, wsUrl: DEF_WS, cdnUrl: DEF_CDN } = getRuntimeConfig();
 
-const { apiUrl: DEFAULT_API_URL, wsUrl: DEFAULT_WS_URL, cdnUrl: DEFAULT_CDN_URL } = getRuntimeConfig();
+const inputBase = 'w-full rounded-md border border-[#242A35] bg-[#141821] px-3 py-2 text-sm text-[#E6EDF3] placeholder:text-[#8892A6] focus:border-[#8AB4F8] focus:outline-none focus:ring-1 focus:ring-[#8AB4F8]';
 
-const inputBase =
-  'w-full rounded-md border border-[#242A35] bg-[#141821] px-3 py-2 text-sm text-[#E6EDF3] placeholder:text-[#8892A6] focus:border-[#8AB4F8] focus:outline-none focus:ring-1 focus:ring-[#8AB4F8]';
+const TK  = 'ermine_session_token';
+const UK  = 'ermine_user_id';
+const AK  = 'ermine_api_url';
 
-const TOKEN_COOKIE_NAME = 'ermine_session_token';
-const USER_COOKIE_NAME  = 'ermine_user_id';
-const API_COOKIE_NAME   = 'ermine_api_url';
-
-const getCookie = (name) => {
-  if (typeof document === 'undefined') return null;
-  const value = document.cookie.split('; ').find((e) => e.startsWith(`${name}=`));
-  return value ? decodeURIComponent(value.slice(name.length + 1)) : null;
-};
-const setCookie = (name, value, maxAge = 60 * 60 * 24 * 30) => {
-  if (typeof document === 'undefined') return;
-  document.cookie = `${name}=${encodeURIComponent(value)}; Max-Age=${maxAge}; Path=/; SameSite=Lax; Secure`;
-};
-const clearCookie = (name) => {
-  if (typeof document === 'undefined') return;
-  document.cookie = `${name}=; Max-Age=0; Path=/; SameSite=Lax; Secure`;
-};
+const getCookie = (n) => { if (typeof document === 'undefined') return null; const v = document.cookie.split('; ').find((e) => e.startsWith(`${n}=`)); return v ? decodeURIComponent(v.slice(n.length + 1)) : null; };
+const setCookie = (n, v, a = 2592000) => { if (typeof document !== 'undefined') document.cookie = `${n}=${encodeURIComponent(v)}; Max-Age=${a}; Path=/; SameSite=Lax; Secure`; };
+const clearCookie = (n) => { if (typeof document !== 'undefined') document.cookie = `${n}=; Max-Age=0; Path=/; SameSite=Lax; Secure`; };
 
 // ─── Status options ───────────────────────────────────────────────────────────
 const STATUS_OPTIONS = [
-  { value: 'Online',    label: 'Online',         icon: Circle,      iconClass: 'text-[#3ba55d]' },
-  { value: 'Idle',      label: 'Idle',            icon: Moon,        iconClass: 'text-[#f0b232]' },
-  { value: 'Busy',      label: 'Do Not Disturb',  icon: MinusCircle, iconClass: 'text-[#ed4245]' },
-  { value: 'Focus',     label: 'Focus',           icon: Circle,      iconClass: 'text-[#4f7dff]' },
-  { value: 'Invisible', label: 'Invisible',       icon: EyeOff,      iconClass: 'text-gray-400' },
+  { value: 'Online',    label: 'Online',        icon: Circle,      iconClass: 'text-[#3ba55d]' },
+  { value: 'Idle',      label: 'Idle',           icon: Moon,        iconClass: 'text-[#f0b232]' },
+  { value: 'Busy',      label: 'Do Not Disturb', icon: MinusCircle, iconClass: 'text-[#ed4245]' },
+  { value: 'Focus',     label: 'Focus',          icon: Circle,      iconClass: 'text-[#4f7dff]' },
+  { value: 'Invisible', label: 'Invisible',      icon: EyeOff,      iconClass: 'text-gray-400'  },
 ];
 
 // ─── Time helpers ─────────────────────────────────────────────────────────────
-const formatSmartTime = (valueOrId) => {
-  let date;
-  if (typeof valueOrId === 'string' && valueOrId.length === 26) {
-    date = new Date(ulidToMillis(valueOrId));
-  } else {
-    date = new Date(valueOrId);
-  }
-  if (Number.isNaN(date.getTime())) return '';
-  const now = new Date();
-  const yesterday = new Date();
-  yesterday.setDate(now.getDate() - 1);
-  const timeStr = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-  if (date.toDateString() === now.toDateString()) return `Today at ${timeStr}`;
-  if (date.toDateString() === yesterday.toDateString()) return `Yesterday at ${timeStr}`;
-  return `${date.toLocaleDateString()} at ${timeStr}`;
+const smartTime = (v) => {
+  const d = typeof v === 'string' && v.length === 26 ? ulidToDate(v) : new Date(v);
+  if (isNaN(d)) return '';
+  const now = new Date(), yest = new Date(); yest.setDate(now.getDate() - 1);
+  const t = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (d.toDateString() === now.toDateString())  return `Today at ${t}`;
+  if (d.toDateString() === yest.toDateString()) return `Yesterday at ${t}`;
+  return `${d.toLocaleDateString()} at ${t}`;
 };
-
-const getMessageDayKey = (message) => {
-  const ts = message.createdAt
-    ? new Date(message.createdAt)
-    : new Date(ulidToMillis(message._id));
-  return Number.isNaN(ts.getTime()) ? '' : ts.toDateString();
+const dayKey = (m) => {
+  const d = m.createdAt ? new Date(m.createdAt) : ulidToDate(m._id);
+  return isNaN(d) ? '' : d.toDateString();
 };
-
-const formatDaySeparator = (message) => {
-  const ts = message.createdAt
-    ? new Date(message.createdAt)
-    : new Date(ulidToMillis(message._id));
-  if (Number.isNaN(ts.getTime())) return '';
-  const now = new Date();
-  const yesterday = new Date();
-  yesterday.setDate(now.getDate() - 1);
-  if (ts.toDateString() === now.toDateString()) return 'Today';
-  if (ts.toDateString() === yesterday.toDateString()) return 'Yesterday';
-  return ts.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+const daySepLabel = (m) => {
+  const d = m.createdAt ? new Date(m.createdAt) : ulidToDate(m._id);
+  if (isNaN(d)) return '';
+  const now = new Date(), yest = new Date(); yest.setDate(now.getDate() - 1);
+  if (d.toDateString() === now.toDateString())  return 'Today';
+  if (d.toDateString() === yest.toDateString()) return 'Yesterday';
+  return d.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 };
+const dateLabel = (v) => { if (!v) return 'Unknown'; const d = new Date(v); return isNaN(d) ? 'Unknown' : d.toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' }); };
 
 // ─── Asset helpers ────────────────────────────────────────────────────────────
-const getAvatarUrl = (user, cdnUrl) => user?.avatar?._id ? `${cdnUrl}/avatars/${user.avatar._id}` : null;
-const getIconUrl   = (server, cdnUrl) => server?.icon?._id ? `${cdnUrl}/icons/${server.icon._id}` : null;
-const getBannerUrl = (user, cdnUrl) => {
-  const banner   = user?.profile?.background || user?.banner;
-  const bannerId = typeof banner === 'string' ? banner : banner?._id;
-  return bannerId ? `${cdnUrl}/backgrounds/${bannerId}/original` : null;
-};
-const getJoinedAt = (entry) => entry?.joined_at || entry?.joinedAt || entry?.created_at || entry?.createdAt || null;
-const toDateLabel = (value) => {
-  if (!value) return 'Unknown';
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? 'Unknown' : d.toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' });
-};
+const avatarUrl = (u, cdn) => u?.avatar?._id ? `${cdn}/avatars/${u.avatar._id}` : null;
+const iconUrl   = (s, cdn) => s?.icon?._id   ? `${cdn}/icons/${s.icon._id}` : null;
+const bannerUrl = (u, cdn) => { const b = u?.profile?.background || u?.banner; const id = typeof b === 'string' ? b : b?._id; return id ? `${cdn}/backgrounds/${id}/original` : null; };
+const joinedAt  = (e) => e?.joined_at || e?.joinedAt || e?.created_at || e?.createdAt || null;
 
-// ─── Shared components ────────────────────────────────────────────────────────
-const Avatar = ({ user, cdnUrl, size = 'md', animateOnHover = false, alwaysAnimate = false }) => {
-  const sizeMap = { sm: 'h-8 w-8 text-xs', md: 'h-10 w-10 text-sm', lg: 'h-12 w-12 text-base' };
-  const initials = (user?.username || '?').slice(0, 2).toUpperCase();
-  const [isHovered, setIsHovered] = useState(false);
-  const [hasError, setHasError]   = useState(false);
-  useEffect(() => { setHasError(false); }, [user?.avatar?._id]);
-  const effectiveAnimate = (alwaysAnimate || (animateOnHover && isHovered)) && !isLowSpec && !hasError;
-  const src = (() => {
-    if (!user?.avatar?._id) return null;
-    return effectiveAnimate
-      ? `${cdnUrl}/avatars/${user.avatar._id}/original`
-      : `${cdnUrl}/avatars/${user.avatar._id}`;
-  })();
+// ─── Avatar component ─────────────────────────────────────────────────────────
+const Avatar = ({ user, cdn, size = 'md', hover = false, always = false }) => {
+  const sz = { sm: 'h-8 w-8 text-xs', md: 'h-10 w-10 text-sm', lg: 'h-12 w-12 text-base' }[size];
+  const init = (user?.username || '?').slice(0, 2).toUpperCase();
+  const [h, setH] = useState(false);
+  const [err, setErr] = useState(false);
+  useEffect(() => { setErr(false); }, [user?.avatar?._id]);
+  const anim = (always || (hover && h)) && !isLowSpec && !err;
+  const src = user?.avatar?._id
+    ? `${cdn}/avatars/${user.avatar._id}${anim ? '/original' : ''}`
+    : null;
   return (
-    <div
-      className={`grid shrink-0 place-items-center overflow-hidden rounded-full bg-[#313338] font-semibold text-gray-200 ${sizeMap[size]}`}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-    >
-      {src ? (
-        <img
-          alt={user?.username || 'User avatar'}
-          className="block h-full w-full object-cover object-center"
-          src={src}
-          onError={() => { if (effectiveAnimate) setHasError(true); }}
-        />
-      ) : initials}
+    <div className={`grid shrink-0 place-items-center overflow-hidden rounded-full bg-[#313338] font-semibold text-gray-200 ${sz}`}
+      onMouseEnter={() => setH(true)} onMouseLeave={() => setH(false)}>
+      {src ? <img alt={user?.username || ''} className="block h-full w-full object-cover" src={src} onError={() => { if (anim) setErr(true); }} /> : init}
     </div>
   );
 };
 
+// ─── Error boundary ───────────────────────────────────────────────────────────
 class AppErrorBoundary extends Component {
-  constructor(props) { super(props); this.state = { hasError: false }; }
-  static getDerivedStateFromError() { return { hasError: true }; }
-  componentDidCatch(error) { console.error('Ermine crashed:', error); }
+  constructor(p) { super(p); this.state = { err: false }; }
+  static getDerivedStateFromError() { return { err: true }; }
+  componentDidCatch(e) { console.error('Ermine crash:', e); }
   render() {
-    if (this.state.hasError) {
-      return (
-        <div className="grid min-h-screen place-items-center bg-[#0F1115] p-6 text-[#E6EDF3]">
-          <div className="w-full max-w-lg rounded-2xl border border-[#242A35] bg-[#171A21] p-8 text-center shadow-2xl">
-            <h1 className="mt-3 text-2xl font-bold text-white">Connection interrupted.</h1>
-            <p className="mt-2 text-sm text-[#A6B0C3]">Attempting recovery requires a reload.</p>
-            <button
-              className="mt-6 rounded-md bg-[#8AB4F8] px-4 py-2 text-sm font-semibold text-[#0F1115] hover:bg-[#6FA6E8]"
-              onClick={() => window.location.reload()}
-              type="button"
-            >
-              Reload Ermine
-            </button>
-          </div>
+    if (!this.state.err) return this.props.children;
+    return (
+      <div className="grid min-h-screen place-items-center bg-[#0F1115] p-6 text-[#E6EDF3]">
+        <div className="w-full max-w-lg rounded-2xl border border-[#242A35] bg-[#171A21] p-8 text-center shadow-2xl">
+          <h1 className="text-2xl font-bold text-white">Connection interrupted.</h1>
+          <p className="mt-2 text-sm text-[#A6B0C3]">A reload is required to recover.</p>
+          <button className="mt-6 rounded-md bg-[#8AB4F8] px-4 py-2 text-sm font-semibold text-[#0F1115] hover:bg-[#6FA6E8]" onClick={() => window.location.reload()}>Reload Ermine</button>
         </div>
-      );
-    }
-    return this.props.children;
+      </div>
+    );
   }
 }
 
-const Modal = ({ title, onClose, children }) => (
-  <div
-    className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm overflow-y-auto"
-    onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
-  >
-    <div className="w-full max-w-lg m-auto rounded-xl border border-[#242A35] bg-[#171A21] shadow-2xl flex max-h-[85vh] flex-col animate-[ermineModalIn_140ms_ease-out]">
+// ─── Modal ────────────────────────────────────────────────────────────────────
+const Modal = ({ title, onClose, children, wide = false }) => (
+  <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm overflow-y-auto"
+    onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}>
+    <div className={`w-full ${wide ? 'max-w-2xl' : 'max-w-lg'} m-auto rounded-xl border border-[#242A35] bg-[#171A21] shadow-2xl flex max-h-[90vh] flex-col animate-[ermineModalIn_140ms_ease-out]`}>
       <div className="flex shrink-0 items-center justify-between border-b border-[#202225] px-4 py-3">
         <h3 className="text-sm font-bold text-white">{title}</h3>
-        <button className="rounded p-1 text-gray-400 hover:bg-[#3a3d42] hover:text-white" onClick={onClose}>
-          <X size={16} />
-        </button>
+        <button className="rounded p-1 text-gray-400 hover:bg-[#3a3d42] hover:text-white" onClick={onClose}><X size={16} /></button>
       </div>
-      <div className="p-4 overflow-y-auto space-y-3">{children}</div>
+      <div className="p-4 overflow-y-auto space-y-3 flex-1">{children}</div>
     </div>
   </div>
 );
 
-const DateSeparator = ({ message }) => (
-  <div className="flex items-center gap-3 px-4 py-3 select-none">
+// ─── Date separator ───────────────────────────────────────────────────────────
+const DateSep = ({ msg }) => (
+  <div className="flex items-center gap-3 px-4 py-3 select-none pointer-events-none">
     <div className="flex-1 h-px bg-[#3f4249]" />
-    <span className="text-xs font-semibold text-gray-400">{formatDaySeparator(message)}</span>
+    <span className="text-xs font-semibold text-gray-400">{daySepLabel(msg)}</span>
     <div className="flex-1 h-px bg-[#3f4249]" />
   </div>
 );
 
-const VirtualList = ({ items, renderItem, itemHeight, className }) => {
-  const containerRef = useRef(null);
-  const [scrollTop, setScrollTop]         = useState(0);
-  const [viewportHeight, setViewportHeight] = useState(0);
+// ─── Optimised member list ─────────────────────────────────────────────────────
+// Uses IntersectionObserver for true culling + variable item heights
+const HEADER_H = 36;
+const MEMBER_H = 44;
+
+const MemberVirtualList = memo(({ items, renderItem, className }) => {
+  const outerRef = useRef(null);
+  const [vpTop, setVpTop] = useState(0);
+  const [vpH, setVpH]     = useState(600);
   const rafRef = useRef();
+
+  // Pre-compute cumulative offsets for variable heights
+  const { offsets, total } = useMemo(() => {
+    let acc = 0;
+    const offs = items.map((item) => {
+      const top = acc;
+      acc += item.type === 'header' ? HEADER_H : MEMBER_H;
+      return top;
+    });
+    return { offsets: offs, total: acc };
+  }, [items]);
+
   useEffect(() => {
-    const el = containerRef.current;
+    const el = outerRef.current;
     if (!el) return;
-    const onResize = () => setViewportHeight(el.clientHeight);
+    const ro = new ResizeObserver(() => setVpH(el.clientHeight));
+    ro.observe(el);
+    setVpH(el.clientHeight);
     const onScroll = () => {
       if (rafRef.current) return;
-      rafRef.current = requestAnimationFrame(() => {
-        setScrollTop(el.scrollTop);
-        rafRef.current = null;
-      });
+      rafRef.current = requestAnimationFrame(() => { setVpTop(el.scrollTop); rafRef.current = null; });
     };
-    setViewportHeight(el.clientHeight);
-    window.addEventListener('resize', onResize);
-    el.addEventListener('scroll', onScroll);
-    return () => {
-      window.removeEventListener('resize', onResize);
-      el.removeEventListener('scroll', onScroll);
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => { ro.disconnect(); el.removeEventListener('scroll', onScroll); if (rafRef.current) cancelAnimationFrame(rafRef.current); };
   }, []);
-  const totalHeight  = items.length * itemHeight;
-  const startIndex   = Math.max(0, Math.floor(scrollTop / itemHeight) - 5);
-  const endIndex     = Math.min(items.length, Math.ceil((scrollTop + viewportHeight) / itemHeight) + 5);
-  const visibleItems = items.slice(startIndex, endIndex).map((item, i) => ({
-    item, index: startIndex + i, offsetTop: (startIndex + i) * itemHeight,
-  }));
+
+  const OVERSCAN = 6;
+  const first = useMemo(() => {
+    // Binary search for first visible index
+    let lo = 0, hi = items.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      const bot = offsets[mid] + (items[mid].type === 'header' ? HEADER_H : MEMBER_H);
+      if (bot < vpTop) lo = mid + 1; else hi = mid;
+    }
+    return Math.max(0, lo - OVERSCAN);
+  }, [offsets, vpTop, items]);
+
+  const last = useMemo(() => {
+    const cutoff = vpTop + vpH;
+    let lo = first, hi = items.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (offsets[mid] > cutoff) hi = mid - 1; else lo = mid;
+    }
+    return Math.min(items.length - 1, lo + OVERSCAN);
+  }, [offsets, vpTop, vpH, first, items]);
+
+  const visible = items.slice(first, last + 1);
+
   return (
-    <div ref={containerRef} className={className} style={{ position: 'relative', overflowY: 'auto' }}>
-      <div style={{ height: totalHeight, width: '100%' }}>
-        {visibleItems.map(({ item, index, offsetTop }) => (
-          <div
-            key={item.key || index}
-            style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: itemHeight, transform: `translateY(${offsetTop}px)` }}
-          >
-            {renderItem(item)}
-          </div>
-        ))}
+    <div ref={outerRef} className={className} style={{ overflowY: 'auto', position: 'relative' }}>
+      <div style={{ height: total, position: 'relative' }}>
+        {visible.map((item, i) => {
+          const idx = first + i;
+          const h = item.type === 'header' ? HEADER_H : MEMBER_H;
+          return (
+            <div key={item.key || idx} style={{ position: 'absolute', top: offsets[idx], left: 0, right: 0, height: h }}>
+              {renderItem(item)}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
-};
+});
 
-// ─── Link / Markdown rendering ────────────────────────────────────────────────
-const LinkAnchor = ({ href, children, onRequestOpenLink, className = 'text-[#8ea1ff] underline hover:text-[#bdc3ff]' }) => (
-  <a
-    className={className}
-    href={href}
-    onClick={(e) => { e.preventDefault(); onRequestOpenLink?.(href); }}
-    rel="noreferrer"
-    target="_blank"
-  >
-    {children}
-  </a>
+// ─── Link / markdown helpers ──────────────────────────────────────────────────
+const LinkAnchor = ({ href, children, openLink, cls = 'text-[#8ea1ff] underline hover:text-[#bdc3ff]' }) => (
+  <a className={cls} href={href} onClick={(e) => { e.preventDefault(); openLink?.(href); }} rel="noreferrer" target="_blank">{children}</a>
 );
 
-const renderLinksInText = (value, keyPrefix = 'link', onRequestOpenLink = null) => {
-  if (!value) return null;
-  return value.split(/(https?:\/\/[^\s]+)/gi).map((part, index) => {
-    if (/^https?:\/\//i.test(part))
-      return <LinkAnchor href={part} key={`${keyPrefix}-${index}`} onRequestOpenLink={onRequestOpenLink}>{part}</LinkAnchor>;
-    return <React.Fragment key={`${keyPrefix}-${index}`}>{part}</React.Fragment>;
-  });
-};
+const renderLinks = (text, key, openLink) =>
+  (text || '').split(/(https?:\/\/[^\s]+)/gi).map((p, i) =>
+    /^https?:\/\//i.test(p) ? <LinkAnchor key={`${key}-${i}`} href={p} openLink={openLink}>{p}</LinkAnchor> : <React.Fragment key={`${key}-${i}`}>{p}</React.Fragment>
+  );
 
-const renderMarkdownInline = (text, keyPrefix = 'md', onRequestOpenLink = null) => {
+const renderMd = (text, key, openLink) => {
   if (!text) return null;
-  const tokens = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|__[^_]+__|~~[^~]+~~|\[[^\]]+\]\([^)]+\))/g);
-  return tokens.map((token, index) => {
-    if (/^`[^`]+`$/.test(token))
-      return <code key={`${keyPrefix}-${index}`} className="rounded bg-[#232428] px-1 py-0.5 text-xs text-[#f2f3f5]">{token.slice(1, -1)}</code>;
-    if (/^\*\*[^*]+\*\*$/.test(token))
-      return <strong key={`${keyPrefix}-${index}`}>{token.slice(2, -2)}</strong>;
-    if (/^\*[^*]+\*$/.test(token))
-      return <em key={`${keyPrefix}-${index}`}>{token.slice(1, -1)}</em>;
-    if (/^__[^_]+__$/.test(token))
-      return <span key={`${keyPrefix}-${index}`} className="underline">{token.slice(2, -2)}</span>;
-    if (/^~~[^~]+~~$/.test(token))
-      return <span key={`${keyPrefix}-${index}`} className="line-through">{token.slice(2, -2)}</span>;
-    const mdLink = token.match(/^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/i);
-    if (mdLink)
-      return <LinkAnchor href={mdLink[2]} key={`${keyPrefix}-${index}`} onRequestOpenLink={onRequestOpenLink}>{mdLink[1]}</LinkAnchor>;
-    return (
-      <React.Fragment key={`${keyPrefix}-${index}`}>
-        {renderLinksInText(token, `${keyPrefix}-plain-${index}`, onRequestOpenLink)}
-      </React.Fragment>
-    );
+  return text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|__[^_]+__|~~[^~]+~~|\[[^\]]+\]\([^)]+\))/g).map((tok, i) => {
+    if (/^`[^`]+`$/.test(tok)) return <code key={`${key}-${i}`} className="rounded bg-[#232428] px-1 py-0.5 text-xs font-mono text-[#f2f3f5]">{tok.slice(1,-1)}</code>;
+    if (/^\*\*[^*]+\*\*$/.test(tok)) return <strong key={`${key}-${i}`}>{tok.slice(2,-2)}</strong>;
+    if (/^\*[^*]+\*$/.test(tok))     return <em key={`${key}-${i}`}>{tok.slice(1,-1)}</em>;
+    if (/^__[^_]+__$/.test(tok))     return <span key={`${key}-${i}`} className="underline">{tok.slice(2,-2)}</span>;
+    if (/^~~[^~]+~~$/.test(tok))     return <span key={`${key}-${i}`} className="line-through">{tok.slice(2,-2)}</span>;
+    const ml = tok.match(/^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/i);
+    if (ml) return <LinkAnchor key={`${key}-${i}`} href={ml[2]} openLink={openLink}>{ml[1]}</LinkAnchor>;
+    return <React.Fragment key={`${key}-${i}`}>{renderLinks(tok, `${key}-pl-${i}`, openLink)}</React.Fragment>;
   });
 };
 
 // ─── Emoji data ───────────────────────────────────────────────────────────────
-const EMOJI_SHORTCODES = {
-  smile: '😄', grin: '😁', joy: '😂', rofl: '🤣', wink: '😉',
-  heart: '❤️', thumbs_up: '👍', thumbs_down: '👎', fire: '🔥',
-  sob: '😭', thinking: '🤔', tada: '🎉', eyes: '👀',
+const SC = { smile:'😄',grin:'😁',joy:'😂',rofl:'🤣',wink:'😉',heart:'❤️',thumbs_up:'👍',thumbs_down:'👎',fire:'🔥',sob:'😭',thinking:'🤔',tada:'🎉',eyes:'👀',rocket:'🚀',star:'⭐',check:'✅',x:'❌',wave:'👋',clap:'👏',100:'💯' };
+const STD_EMOJI = ['😀','😃','😄','😁','😆','😅','🤣','😂','🙂','🙃','😉','😊','😇','🥰','😍','🤩','😘','😗','😚','😙','🥲','😋','😛','😜','🤪','😝','🤑','🤗','🤭','🫢','🫣','🤫','🤔','🫡','🤐','🤨','😐','😑','😶','🫥','😏','😒','🙄','😬','🤥','😌','😔','😪','🤤','😴','😷','🤒','🤕','🤢','🤮','🤧','🥵','🥶','🥴','😵','🤯','🤠','🥳','🥸','😎','🤓','🧐','😕','😟','🙁','☹️','😮','😯','😲','😳','🥺','🥹','😦','😧','😨','😰','😥','😢','😭','😱','😖','😣','😞','😓','😩','😫','🥱','😤','😡','😠','🤬','😈','👿','💀','☠️','💩','🤡','👻','👽','👾','🤖','👋','🤚','🖐','✋','🖖','👌','🤌','🤏','✌️','🤞','🫰','🤟','🤘','🤙','👈','👉','👆','👇','☝️','👍','👎','✊','👊','🤛','🤜','👏','🙌','🫶','👐','🤲','🤝','🙏','✍️','💅','💪','👀','👄','🫦','💋','🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯','🦁','🐮','🐷','🐸','🐵','🙈','🙉','🙊','🐔','🐧','🐦','🐤','🦆','🦅','🦉','🦇','🐺','🐴','🦄','🐝','🐛','🦋','🐌','🐞','🐜','🦟','🦗','🐢','🐍','🦎','🐙','🦑','🐡','🐠','🐟','🐬','🐳','🐋','🦈','🐊','🐘','🦍','🐇','🦔','🌸','🌺','🌻','🌹','🍀','🌿','🍁','🍂','🌊','🌙','⭐','🌟','☀️','⛅','🌈','❄️','⚡','🔥','💧','🌍','🍎','🍊','🍋','🍇','🍓','🍕','🍔','🍟','🌮','🍜','🍣','🍦','🎂','🍰','🍫','☕','🧃','🍺','🥂','⚽','🏀','🎮','🎲','🎯','🏆','🥇','🎵','🎶','🎤','🎸','🎺','📱','💻','⌨️','🖥️','📷','🔑','💡','🔔','📢','📌','📎','✏️','📝','📚','💰','💎','🚀','✈️','🚗','🏠','🏰','❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❣️','💕','💞','💓','💗','💖','💘','💝','✅','❌','⭕','💯','🔴','🟠','🟡','🟢','🔵','🟣','⚫','⚪','🟤'];
+
+const MEMBER_CHUNK = 400;
+
+// ─── Emoji token helpers ──────────────────────────────────────────────────────
+const isCE  = (v) => /^:[A-Z0-9]{26}:$/i.test(v || '');
+const getCEId = (t) => t?.slice(1, -1);
+const resolveCE = (token, byId) => {
+  const eff = /^[A-Z0-9]{26}$/i.test(token) ? `:${token}:` : token;
+  if (!isCE(eff)) return null;
+  const id = getCEId(eff);
+  return byId?.[id] || { id, name: id, unresolved: true };
 };
-
-const STANDARD_EMOJIS = [
-  '😀','😃','😄','😁','😆','😅','🤣','😂','🙂','🙃','😉','😊','😇','🥰','😍','🤩','😘','😗','😚','😙','🥲','😋','😛','😜','🤪','😝','🤑','🤗','🤭','🫢','🫣','🤫','🤔','🫡','🤐','🤨','😐','😑','😶','🫥','😏','😒','🙄','😬','🤥','😌','😔','😪','🤤','😴','😷','🤒','🤕','🤢','🤮','🤧','🥵','🥶','🥴','😵','🤯','🤠','🥳','🥸','😎','🤓','🧐','😕','😟','🙁','☹️','😮','😯','😲','😳','🥺','🥹','😦','😧','😨','😰','😥','😢','😭','😱','😖','😣','😞','😓','😩','😫','🥱','😤','😡','😠','🤬','😈','👿','💀','☠️','💩','🤡','👹','👺','👻','👽','👾','🤖',
-  '👋','🤚','🖐','✋','🖖','👌','🤌','🤏','✌️','🤞','🫰','🤟','🤘','🤙','👈','👉','👆','👇','☝️','👍','👎','✊','👊','🤛','🤜','👏','🙌','🫶','👐','🤲','🤝','🙏','✍️','💅','💪','👀','👅','👄','🫦','💋',
-  '🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯','🦁','🐮','🐷','🐸','🐵','🐔','🐧','🐦','🐤','🦆','🦅','🦉','🦇','🐺','🐴','🦄','🐝','🐛','🦋','🐌','🐞','🐜','🦟','🦗','🐢','🐍','🦎','🐙','🦑','🐡','🐠','🐟','🐬','🐳','🐋','🦈','🐊','🐘','🦍','🐇','🦔',
-  '🌸','🌺','🌻','🌹','🍀','🌿','🍁','🍂','🌊','🌙','⭐','🌟','☀️','⛅','🌈','❄️','⚡','🔥','💧','🌍',
-  '🍎','🍊','🍋','🍇','🍓','🍑','🍒','🥝','🍕','🍔','🍟','🌮','🍜','🍣','🍦','🎂','🍰','🍫','🍬','☕','🧃','🍺','🥂',
-  '⚽','🏀','🎮','🎲','🎯','🏆','🥇','🎵','🎶','🎤','🎸','🎺','📱','💻','⌨️','🖥️','📷','🔑','💡','🔔','📢','📌','📎','✏️','📝','📚','💰','💎','🚀','✈️','🚗','🚢','🏠','🏰','🗼','🌉',
-  '❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❣️','💕','💞','💓','💗','💖','💘','💝','💟','☮️','✝️','☯️','🔴','🟠','🟡','🟢','🔵','🟣','⚫','⚪','🟤',
-  '✅','❌','⭕','🔱','♻️','🆘','⛔','🚫','💯','🔞','🔝','🆕','🆙','🆒','🆓','🆖','🆗','📶','🔇','🔊','📣','🔔','🔕','📵','🚷','🚯','🚱','🚳','🔒','🔓','🔐',
-];
-
-const MEMBER_RENDER_LIMIT  = 250;
-const MEMBER_HYDRATE_CHUNK = 400;
-
-// ─── Reaction / emoji helpers ─────────────────────────────────────────────────
-const toReactionEntries = (reactions) => {
-  if (!reactions || typeof reactions !== 'object') return [];
-  return Object.entries(reactions)
-    .map(([emoji, userIds]) => ({ emoji, userIds: Array.isArray(userIds) ? userIds : [] }))
-    .filter((e) => e.userIds.length > 0);
-};
-
-const getReplyIdFromMessage = (message) => {
-  const firstReply = Array.isArray(message?.replies) ? message.replies[0] : null;
-  return typeof firstReply === 'string' ? firstReply : firstReply?.id || firstReply?._id || null;
-};
-
-const isCustomEmojiToken  = (value) => /^:[A-Z0-9]{26}:$/i.test(value || '');
-const getCustomEmojiId    = (token) => token?.slice(1, -1);
-
-const resolveCustomEmojiMeta = (token, customEmojiById) => {
-  const effectiveToken = /^[A-Z0-9]{26}$/i.test(token) ? `:${token}:` : token;
-  if (!isCustomEmojiToken(effectiveToken)) return null;
-  const emojiId = getCustomEmojiId(effectiveToken);
-  return customEmojiById?.[emojiId] || { id: emojiId, name: emojiId, serverName: null, isPrivate: false, unresolved: true };
-};
-
-const renderEmojiVisual = (token, customEmoji, cdnUrl) => {
-  const rawId  = /^[A-Z0-9]{26}$/i.test(token) ? token : (isCustomEmojiToken(token) ? getCustomEmojiId(token) : null);
-  const emojiId = customEmoji?.id || rawId;
-  if (emojiId)
-    return <img alt={customEmoji?.name || token} className="inline h-5 w-5 align-text-bottom object-contain" src={`${cdnUrl}/emojis/${emojiId}`} />;
-  if (Object.values(EMOJI_SHORTCODES).includes(token) || STANDARD_EMOJIS.includes(token) || !token.startsWith(':'))
-    return renderTwemoji(token);
-  return token;
+const renderEmojiVis = (token, ce, cdn) => {
+  const id = ce?.id || (/^[A-Z0-9]{26}$/i.test(token) ? token : isCE(token) ? getCEId(token) : null);
+  if (id) return <img alt={ce?.name || token} className="inline h-5 w-5 align-text-bottom object-contain" src={`${cdn}/emojis/${id}`} />;
+  return renderTwemoji(token);
 };
 
 // ─── Attachment helpers ───────────────────────────────────────────────────────
-const isImageLike = (filename = '', contentType = '') => {
-  if (typeof contentType === 'string' && contentType.startsWith('image/')) return true;
-  const ext = filename?.split('.').pop()?.toLowerCase();
-  return ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'avif', 'svg'].includes(ext);
+const isImg = (fn = '', ct = '') => ct.startsWith('image/') || ['png','jpg','jpeg','webp','gif','bmp','avif','svg'].includes(fn.split('.').pop()?.toLowerCase());
+const attachData = (a, cdn, idx = 0) => {
+  const id  = typeof a === 'string' ? a : a?._id || a?.id;
+  const fn  = a?.filename || a?.name || `attachment-${idx + 1}`;
+  const ct  = a?.content_type || a?.contentType || a?.metadata?.type || '';
+  return { id, fn, url: id ? `${cdn}/attachments/${id}` : null, img: isImg(fn, ct) };
 };
-
-const getAttachmentData = (attachment, cdnUrl, index = 0) => {
-  const attachmentId = typeof attachment === 'string' ? attachment : attachment?._id || attachment?.id;
-  const filename     = attachment?.filename || attachment?.name || `attachment-${index + 1}`;
-  const contentType  = attachment?.content_type || attachment?.contentType || attachment?.metadata?.type || '';
-  const url          = attachmentId ? `${cdnUrl}/attachments/${attachmentId}` : null;
-  const image        = isImageLike(filename, contentType);
-  return { attachmentId, filename, url, image };
-};
-
-const extractUrls          = (value = '') => value.match(/https?:\/\/[^\s]+/gi) || [];
-const isEmbeddableImageLink = (url) => {
-  if (!url) return false;
-  return /\.(png|jpe?g|webp|gif|bmp|avif|svg)(\?.*)?$/i.test(url);
-};
+const isImgUrl = (u) => u && /\.(png|jpe?g|webp|gif|bmp|avif|svg)(\?.*)?$/i.test(u.split('?')[0]);
+const extractUrls = (v = '') => v.match(/https?:\/\/[^\s]+/gi) || [];
 
 // ─── Message content renderer ─────────────────────────────────────────────────
-const renderMessageContent = (content, users, channels, onUserClick, customEmojiById, cdnUrl, onRequestOpenLink) => {
+const renderContent = (content, users, channels, onUser, ceById, cdn, openLink) => {
   if (!content) return null;
-  return content
-    .split(/(<@!?[A-Za-z0-9]+>|<#[A-Za-z0-9]+>|:[A-Z0-9]{26}:)/g)
-    .map((part, index) => {
-      const userMention = part.match(/^<@!?([A-Za-z0-9]+)>$/);
-      if (userMention) {
-        const userId = userMention[1];
-        const user   = users[userId];
-        return (
-          <button
-            className="mx-0.5 inline rounded bg-[#5865f2]/25 px-1 text-[#bdc3ff] hover:bg-[#5865f2]/35"
-            key={`${part}-${index}`}
-            onClick={() => onUserClick(user || { _id: userId, username: 'Loading user…', _loading: true }, userId)}
-          >
-            @{user?.username || 'loading-user'}
-          </button>
-        );
-      }
-      const channelMention = part.match(/^<#([A-Za-z0-9]+)>$/);
-      if (channelMention)
-        return <span className="mx-0.5 inline rounded bg-[#3f4249] px-1 text-gray-100" key={`${part}-${index}`}>#{channels[channelMention[1]]?.name || 'unknown-channel'}</span>;
-      if (isCustomEmojiToken(part)) {
-        const ce = resolveCustomEmojiMeta(part, customEmojiById);
-        return (
-          <span className="mx-0.5 inline-flex items-center" key={`${part}-${index}`} title={ce?.name || part}>
-            {renderEmojiVisual(part, ce, cdnUrl)}
-          </span>
-        );
-      }
-      const shortcodeMatch = part.match(/^:([a-z0-9_+-]+):$/i);
-      if (shortcodeMatch) {
-        const mapped = EMOJI_SHORTCODES[shortcodeMatch[1].toLowerCase()];
-        if (mapped) return renderTwemoji(mapped);
-      }
-      const textEl = renderMarkdownInline(part, `md-${index}`, onRequestOpenLink);
-      return <React.Fragment key={`${part}-${index}`}>{textEl}</React.Fragment>;
-    });
+  return content.split(/(<@!?[A-Za-z0-9]+>|<#[A-Za-z0-9]+>|:[A-Z0-9]{26}:)/g).map((p, i) => {
+    const um = p.match(/^<@!?([A-Za-z0-9]+)>$/);
+    if (um) { const u = users[um[1]]; return <button key={i} className="mx-0.5 inline rounded bg-[#5865f2]/25 px-1 text-[#bdc3ff] hover:bg-[#5865f2]/35" onClick={() => onUser(u || { _id: um[1], username: 'Unknown' }, um[1])}>@{u?.username || um[1]}</button>; }
+    const cm = p.match(/^<#([A-Za-z0-9]+)>$/);
+    if (cm) return <span key={i} className="mx-0.5 inline rounded bg-[#3f4249] px-1 text-gray-100">#{channels[cm[1]]?.name || 'unknown'}</span>;
+    if (isCE(p)) { const ce = resolveCE(p, ceById); return <span key={i} className="mx-0.5 inline-flex items-center" title={ce?.name}>{renderEmojiVis(p, ce, cdn)}</span>; }
+    const sc = p.match(/^:([a-z0-9_+-]+):$/i);
+    if (sc && SC[sc[1].toLowerCase()]) return renderTwemoji(SC[sc[1].toLowerCase()]);
+    return <React.Fragment key={i}>{renderMd(p, `m${i}`, openLink)}</React.Fragment>;
+  });
 };
+
+// ─── System message renderer ──────────────────────────────────────────────────
+const renderSystem = (msg, users) => {
+  const sys = msg.system;
+  if (!sys) return null;
+  const byId = (id) => users[id]?.username || id?.slice(0, 8) || 'Unknown';
+  switch (sys.type) {
+    case 'text':          return <span className="italic">{sys.content}</span>;
+    case 'user_added':    return <span className="italic text-green-400">👋 {byId(sys.by)} added {byId(sys.id)} to the group.</span>;
+    case 'user_remove':   return <span className="italic text-red-400">👋 {byId(sys.by)} removed {byId(sys.id)} from the group.</span>;
+    case 'user_joined':   return <span className="italic text-green-400">👋 {byId(sys.id)} joined.</span>;
+    case 'user_left':     return <span className="italic text-gray-400">👋 {byId(sys.id)} left.</span>;
+    case 'user_kicked':   return <span className="italic text-red-400">👢 {byId(sys.id)} was kicked by {byId(sys.by)}.</span>;
+    case 'user_banned':   return <span className="italic text-red-400">🔨 {byId(sys.id)} was banned by {byId(sys.by)}.</span>;
+    case 'channel_renamed': return <span className="italic text-blue-400">✏️ {byId(sys.by)} renamed the channel to <strong>{sys.name}</strong>.</span>;
+    case 'channel_description_changed': return <span className="italic text-blue-400">📝 {byId(sys.by)} updated the channel description.</span>;
+    case 'channel_icon_changed': return <span className="italic text-blue-400">🖼️ {byId(sys.by)} changed the channel icon.</span>;
+    case 'channel_ownership_changed': return <span className="italic text-yellow-400">👑 Channel ownership transferred by {byId(sys.by)} to {byId(sys.to)}.</span>;
+    default: return <span className="italic text-gray-500">[system event: {sys.type}]</span>;
+  }
+};
+
+// ─── URL Embed component ──────────────────────────────────────────────────────
+const UrlEmbed = memo(({ embed, cdn, openLink }) => {
+  if (!embed) return null;
+  const { type, url, title, description, image, icon_url, colour, site_name } = embed;
+  if (type === 'Image') return (
+    <button className="block mt-1.5 overflow-hidden rounded-lg border border-[#2f3237] hover:border-[#4a4d55] transition-colors max-w-xs" onClick={() => openLink(embed.url)} type="button">
+      <img alt="Embed image" className="max-h-64 max-w-full object-contain" src={embed.url} loading="lazy" />
+    </button>
+  );
+  if (type === 'Website' || type === 'Text') {
+    const imgSrc = image?.url || null;
+    return (
+      <div className="mt-1.5 rounded-lg border-l-4 bg-[#1e2024] p-3 max-w-sm" style={{ borderColor: colour || '#3a3d42' }}>
+        {site_name && <p className="text-xs text-gray-400 mb-1">{site_name}</p>}
+        {title && <a className="text-sm font-semibold text-[#8ea1ff] hover:underline block" href={url} onClick={(e) => { e.preventDefault(); openLink(url); }} rel="noreferrer" target="_blank">{title}</a>}
+        {description && <p className="text-xs text-gray-300 mt-1 line-clamp-3">{description}</p>}
+        {imgSrc && <img alt="Embed preview" className="mt-2 max-h-40 w-full rounded object-cover" src={imgSrc} loading="lazy" />}
+      </div>
+    );
+  }
+  return null;
+});
 
 // ─── State helpers ────────────────────────────────────────────────────────────
-const withoutClearedFields = (base, clear = []) => {
-  if (!clear?.length) return base;
-  const next = { ...base };
-  clear.forEach((field) => {
-    const key = field?.[0]?.toLowerCase() + field?.slice(1);
-    if (key) delete next[key];
-  });
-  return next;
-};
-
-const uniqueMessages = (list) => {
-  const seen = new Set();
-  return list.filter((item) => { if (!item?._id || seen.has(item._id)) return false; seen.add(item._id); return true; });
-};
+const clearFields = (base, clear = []) => { if (!clear?.length) return base; const n = { ...base }; clear.forEach((f) => { const k = f?.[0]?.toLowerCase() + f?.slice(1); if (k) delete n[k]; }); return n; };
+const uniq = (list) => { const s = new Set(); return list.filter((m) => { if (!m?._id || s.has(m._id)) return false; s.add(m._id); return true; }); };
 
 // ─── Member list helpers ──────────────────────────────────────────────────────
-const sortRoles           = (rolesMap) => !rolesMap ? [] : Object.entries(rolesMap).map(([id, role]) => ({ id, ...role })).sort((a, b) => (b.rank || 0) - (a.rank || 0));
-const getMemberHighestRole = (member, sortedRoles) => { if (!member.roles?.length) return null; for (const r of sortedRoles) if (member.roles.includes(r.id)) return r; return null; };
-const getMemberHoistedRole = (member, sortedRoles) => { if (!member.roles?.length) return null; for (const r of sortedRoles) if (member.roles.includes(r.id) && r.hoist) return r; return null; };
+const sortRoles  = (rm) => !rm ? [] : Object.entries(rm).map(([id, r]) => ({ id, ...r })).sort((a, b) => (b.rank || 0) - (a.rank || 0));
+const highRole   = (m, sr) => { if (!m.roles?.length) return null; for (const r of sr) if (m.roles.includes(r.id)) return r; return null; };
+const hoistRole  = (m, sr) => { if (!m.roles?.length) return null; for (const r of sr) if (m.roles.includes(r.id) && r.hoist) return r; return null; };
 
-const organizeMembers = (members, rolesMap, users) => {
-  const sortedRoles = sortRoles(rolesMap);
-  const groups = {};
-  sortedRoles.filter((r) => r.hoist).forEach((role) => {
-    groups[role.id] = { id: role.id, name: role.name, color: role.colour, rank: role.rank, members: [] };
+const organizeMembers = (mems, rolesMap, users) => {
+  const sr = sortRoles(rolesMap);
+  const gs = {};
+  sr.filter((r) => r.hoist).forEach((r) => { gs[r.id] = { id: r.id, name: r.name, color: r.colour, rank: r.rank, members: [] }; });
+  gs['Online']  = { id: 'Online',  name: 'Online',  color: null, rank: -1,  members: [] };
+  gs['Offline'] = { id: 'Offline', name: 'Offline', color: null, rank: -2, members: [] };
+  mems.forEach((m) => {
+    const u = users[m._id.user]; if (!u) return;
+    const hr = hoistRole(m, sr), xr = highRole(m, sr);
+    const off = !u.status || u.status.presence === 'Invisible' || u.status.presence === 'Offline';
+    const em = { ...m, user: u, color: xr?.colour || null };
+    if (hr && !off) { if (!gs[hr.id]) gs[hr.id] = { id: hr.id, name: hr.name, color: hr.colour, rank: hr.rank, members: [] }; gs[hr.id].members.push(em); }
+    else gs[off ? 'Offline' : 'Online'].members.push(em);
   });
-  groups['Online']  = { id: 'Online',  name: 'Online',  color: null, rank: -1, members: [] };
-  groups['Offline'] = { id: 'Offline', name: 'Offline', color: null, rank: -2, members: [] };
-
-  members.forEach((member) => {
-    const user = users[member._id.user];
-    if (!user) return;
-    const hoistedRole = getMemberHoistedRole(member, sortedRoles);
-    const highestRole = getMemberHighestRole(member, sortedRoles);
-    const isOffline   = !user.status || user.status.presence === 'Invisible' || user.status.presence === 'Offline';
-    const enriched    = { ...member, user, color: highestRole?.colour || null };
-    if (hoistedRole && !isOffline) {
-      if (!groups[hoistedRole.id])
-        groups[hoistedRole.id] = { id: hoistedRole.id, name: hoistedRole.name, color: hoistedRole.colour, rank: hoistedRole.rank, members: [] };
-      groups[hoistedRole.id].members.push(enriched);
-    } else {
-      groups[isOffline ? 'Offline' : 'Online'].members.push(enriched);
-    }
+  const flat = [];
+  Object.values(gs).filter((g) => g.members.length).sort((a, b) => b.rank - a.rank).forEach((g) => {
+    flat.push({ type: 'header', key: `h-${g.id}`, name: g.name, count: g.members.length });
+    [...g.members].sort((a, b) => (a.nickname || a.user?.username || '').localeCompare(b.nickname || b.user?.username || '')).forEach((m) => flat.push({ type: 'member', key: m._id.user, data: m }));
   });
-
-  const flatList = [];
-  Object.values(groups)
-    .filter((g) => g.members.length > 0)
-    .sort((a, b) => b.rank - a.rank)
-    .forEach((group) => {
-      flatList.push({ type: 'header', key: `header-${group.id}`, name: group.name, count: group.members.length, color: group.color });
-      group.members
-        .sort((a, b) => (a.nickname || a.user?.username || '').localeCompare(b.nickname || b.user?.username || ''))
-        .forEach((m) => flatList.push({ type: 'member', key: m._id.user, data: m }));
-    });
-  return flatList;
+  return flat;
 };
 
-// ─── Connection status badge ──────────────────────────────────────────────────
+// ─── Status badge ─────────────────────────────────────────────────────────────
 const StatusBadge = ({ status }) => {
-  const map = {
-    ready:          { label: 'Connected',     color: 'bg-[#3ba55d]' },
-    authenticated:  { label: 'Authenticating',color: 'bg-[#f0b232]' },
-    connecting:     { label: 'Connecting',    color: 'bg-[#f0b232]' },
-    disconnected:   { label: 'Disconnected',  color: 'bg-[#ed4245]' },
-    error:          { label: 'Error',         color: 'bg-[#ed4245]' },
-  };
-  const key   = status.startsWith('error:') ? 'error' : status;
-  const entry = map[key] || { label: status, color: 'bg-gray-400' };
+  const MAP = { ready: ['Connected', '#3ba55d', false], authenticated: ['Auth…', '#f0b232', true], connecting: ['Connecting…', '#f0b232', true], disconnected: ['Disconnected', '#ed4245', false], error: ['Error', '#ed4245', false] };
+  const k = status.startsWith('error:') ? 'error' : status;
+  const [label, color, pulse] = MAP[k] || [status, '#888', false];
   return (
-    <span className="flex items-center gap-1.5 text-[11px] text-gray-400">
-      <span className={`h-1.5 w-1.5 rounded-full ${entry.color} ${key === 'connecting' || key === 'authenticated' ? 'animate-pulse' : ''}`} />
-      {entry.label}
+    <span className="flex items-center gap-1.5 text-[11px] text-gray-400 select-none">
+      <span className={`h-1.5 w-1.5 rounded-full ${pulse ? 'animate-pulse' : ''}`} style={{ background: color }} />
+      {label}
     </span>
   );
 };
 
-// ─── Message component ────────────────────────────────────────────────────────
+// ─── Typing indicator ─────────────────────────────────────────────────────────
+const TypingIndicator = ({ userIds, users }) => {
+  const names = useMemo(() => userIds.slice(0, 3).map((id) => users[id]?.username || 'Someone'), [userIds, users]);
+  if (!names.length) return null;
+  const label = names.length === 1 ? `${names[0]} is typing` : names.length === 2 ? `${names[0]} and ${names[1]} are typing` : `${names[0]}, ${names[1]} and ${names.length - 2} more are typing`;
+  return (
+    <div className="flex items-center gap-2 px-4 py-1 text-xs text-gray-400 select-none">
+      <span className="flex items-center gap-0.5 h-4">{[0,1,2].map((i) => <span key={i} className="typing-dot w-1.5 h-1.5 rounded-full bg-gray-400 inline-block" style={{ animationDelay: `${i * 0.15}s` }} />)}</span>
+      <span><strong className="text-gray-300">{label}</strong>…</span>
+    </div>
+  );
+};
+
+// ─── Reactions helpers ────────────────────────────────────────────────────────
+const toReactions = (r) => !r || typeof r !== 'object' ? [] : Object.entries(r).map(([e, ids]) => ({ emoji: e, ids: Array.isArray(ids) ? ids : [] })).filter((x) => x.ids.length);
+const replyId = (m) => { const r = Array.isArray(m?.replies) ? m.replies[0] : null; return typeof r === 'string' ? r : r?.id || r?._id || null; };
+
+// ─── Message ──────────────────────────────────────────────────────────────────
 const Message = memo(({
-  message, users, channels, me, onUserClick, cdnUrl,
-  onToggleReaction, onReply, replyTarget, onJumpToMessage,
-  registerMessageRef, customEmojiById, reactionOptions, onRequestOpenLink,
-  onEditMessage, onDeleteMessage, replyMessageMap,
+  message, users, channels, me, onUser, cdn, onReact, onReply,
+  replyTarget, jumpTo, regRef, ceById, reactOpts, openLink,
+  onEdit, onDelete, replyMap,
 }) => {
-  const authorId        = typeof message.author === 'string' ? message.author : message.author?._id;
-  const author          = users[authorId] || (typeof message.author === 'object' ? message.author : null) || { _id: authorId, username: 'Loading user…', _loading: true };
-  const mine            = me === authorId;
-  const messageReactions = toReactionEntries(message.reactions);
-  const replyId         = getReplyIdFromMessage(message);
-  const fullReplyMessage = replyId ? (replyMessageMap[replyId] || (message.replyMessage?._id === replyId ? message.replyMessage : null)) : null;
-  const replyAuthorId   = fullReplyMessage ? (typeof fullReplyMessage.author === 'string' ? fullReplyMessage.author : fullReplyMessage.author?._id) : message.replyMessage?.authorId;
-  const replyUser       = replyAuthorId ? users[replyAuthorId] : message.replyMessage?.authorUser;
+  // Masquerade support: bots can override display name/avatar/colour
+  const masq    = message.masquerade;
+  const authorId = typeof message.author === 'string' ? message.author : message.author?._id;
+  const baseUser = users[authorId] || (typeof message.author === 'object' ? message.author : null) || { _id: authorId, username: 'Unknown' };
+  const displayUser = masq
+    ? { ...baseUser, username: masq.name || baseUser.username, avatar: masq.avatar ? { _id: masq.avatar } : baseUser.avatar }
+    : baseUser;
+  const displayColor = masq?.colour || message.author?.color || null;
+  const mine = me === authorId;
 
-  const [showReactionPicker, setShowReactionPicker] = useState(false);
-  const [isMessageHovered, setIsMessageHovered]     = useState(false);
-  const [isEditing, setIsEditing]                   = useState(false);
-  const [editContent, setEditContent]               = useState('');
-  const [emojiSearch, setEmojiSearch]               = useState('');
+  const rid = replyId(message);
+  const replyMsg  = rid ? (replyMap[rid] || (message.replyMessage?._id === rid ? message.replyMessage : null)) : null;
+  const replyAuthorId = replyMsg ? (typeof replyMsg.author === 'string' ? replyMsg.author : replyMsg.author?._id) : message.replyMessage?.authorId;
+  const replyUser = replyAuthorId ? users[replyAuthorId] : message.replyMessage?.authorUser;
 
-  const pickerRef   = useRef(null);
-  const editAreaRef = useRef(null);
-
-  // Auto-resize edit textarea
-  useEffect(() => {
-    const el = editAreaRef.current;
-    if (!el || !isEditing) return;
-    el.style.height = 'auto';
-    el.style.height = Math.min(el.scrollHeight, 200) + 'px';
-  }, [editContent, isEditing]);
+  const reactions = toReactions(message.reactions);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [hovered, setHovered]       = useState(false);
+  const [editing, setEditing]       = useState(false);
+  const [editVal, setEditVal]       = useState('');
+  const [emojiQ, setEmojiQ]         = useState('');
+  const pickerRef = useRef(null);
+  const editRef   = useRef(null);
 
   useEffect(() => {
-    if (!showReactionPicker) { setEmojiSearch(''); return; }
-    const handler = (e) => { if (pickerRef.current && !pickerRef.current.contains(e.target)) setShowReactionPicker(false); };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [showReactionPicker]);
-
-  const embeddedLinks   = useMemo(() => extractUrls(message.content || ''), [message.content]);
-  const [resolvedImages, setResolvedImages] = useState([]);
+    const el = editRef.current; if (!el || !editing) return;
+    el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+  }, [editVal, editing]);
 
   useEffect(() => {
-    let cancelled = false;
-    if (!embeddedLinks.length) { setResolvedImages([]); return; }
-    Promise.all(
-      embeddedLinks.map(async (url) => {
-        if (/^https?:\/\/media\.tenor\.com\//i.test(url)) {
-          try {
-            const res  = await fetch(`https://tenor.com/oembed?url=${encodeURIComponent(url)}`);
-            if (!res.ok) return { url, src: url };
-            const data = await res.json();
-            return { url, src: data?.url || data?.thumbnail_url || url };
-          } catch { return { url, src: url }; }
-        }
-        if (isEmbeddableImageLink(url)) return { url, src: url };
-        return null;
-      }),
-    ).then((results) => { if (!cancelled) setResolvedImages(results.filter(Boolean)); });
-    return () => { cancelled = true; };
-  }, [embeddedLinks]);
+    if (!pickerOpen) { setEmojiQ(''); return; }
+    const h = (e) => { if (pickerRef.current && !pickerRef.current.contains(e.target)) setPickerOpen(false); };
+    document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h);
+  }, [pickerOpen]);
 
-  const startEditing = () => { setEditContent(message.content || ''); setIsEditing(true); setShowReactionPicker(false); };
-  const saveEdit     = () => { if (editContent.trim() !== message.content) onEditMessage(message._id, editContent); setIsEditing(false); };
-  const cancelEdit   = () => { setIsEditing(false); setEditContent(''); };
+  // Embedded link image detection
+  const embeddedUrls = useMemo(() => extractUrls(message.content || ''), [message.content]);
+  const [resolvedImgs, setResolved] = useState([]);
+  useEffect(() => {
+    if (!embeddedUrls.length) { setResolved([]); return; }
+    let cancel = false;
+    Promise.all(embeddedUrls.map(async (u) => {
+      if (/^https?:\/\/media\.tenor\.com\//i.test(u)) {
+        try { const r = await fetch(`https://tenor.com/oembed?url=${encodeURIComponent(u)}`); if (!r.ok) return { u, src: u }; const d = await r.json(); return { u, src: d?.url || d?.thumbnail_url || u }; }
+        catch { return { u, src: u }; }
+      }
+      if (isImgUrl(u)) return { u, src: u };
+      return null;
+    })).then((r) => { if (!cancel) setResolved(r.filter(Boolean)); });
+    return () => { cancel = true; };
+  }, [embeddedUrls]);
 
-  const filteredReactionEmojis = useMemo(() => {
-    if (!emojiSearch) return null;
-    const q = emojiSearch.toLowerCase();
-    return reactionOptions.filter((o) => o.custom && o.label.toLowerCase().includes(q));
-  }, [emojiSearch, reactionOptions]);
+  const filtered = useMemo(() => {
+    if (!emojiQ) return null;
+    const q = emojiQ.toLowerCase();
+    return reactOpts.filter((o) => o.custom && o.label.toLowerCase().includes(q));
+  }, [emojiQ, reactOpts]);
 
-  const timestampDisplay = message.createdAt ? formatSmartTime(message.createdAt) : formatSmartTime(message._id);
+  const ts = message.createdAt ? smartTime(message.createdAt) : smartTime(message._id);
+
+  // System message
+  if (message.system) return (
+    <div className="group px-4 py-1 text-xs text-gray-400 flex items-center gap-2 hover:bg-[#2e3035]" ref={(n) => regRef(message._id, n)}>
+      <div className="h-px flex-1 bg-[#3f4249]" />
+      <span>{renderSystem(message, users)}</span>
+      <div className="h-px flex-1 bg-[#3f4249]" />
+    </div>
+  );
 
   return (
     <article
       className={`group relative flex gap-3 px-4 py-0.5 transition-colors duration-75 hover:bg-[#2e3035] ${replyTarget === message._id ? 'bg-[#3a3f66]/20' : ''}`}
-      onMouseEnter={() => setIsMessageHovered(true)}
-      onMouseLeave={() => setIsMessageHovered(false)}
-      ref={(node) => registerMessageRef(message._id, node)}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      ref={(n) => regRef(message._id, n)}
     >
-      <button className="mt-0.5 shrink-0" onClick={() => onUserClick(author, authorId)} type="button">
-        <Avatar alwaysAnimate={isMessageHovered} cdnUrl={cdnUrl} user={author} />
+      <button className="mt-0.5 shrink-0" onClick={() => onUser(displayUser, authorId)} type="button">
+        <Avatar user={displayUser} cdn={cdn} always={hovered} />
       </button>
       <div className="min-w-0 flex-1 py-1">
-        {replyId ? (
-          <button
-            className="mb-1 flex max-w-full items-center gap-1 text-xs text-gray-400 hover:text-gray-200 transition-colors"
-            onClick={() => onJumpToMessage(replyId)}
-            type="button"
-          >
-            <Reply size={12} />
-            <span className="truncate">
-              {replyUser?.username || 'Loading user…'}: {fullReplyMessage?.content || message.replyMessage?.content || 'Attachment / embed'}
-            </span>
+        {rid && (
+          <button className="mb-1 flex max-w-full items-center gap-1 text-xs text-gray-400 hover:text-gray-200 transition-colors" onClick={() => jumpTo(rid)} type="button">
+            <Reply size={11} />
+            <span className="truncate">{replyUser?.username || 'Unknown'}: {replyMsg?.content || 'Attachment/embed'}</span>
           </button>
-        ) : null}
+        )}
 
         <div className="flex items-baseline gap-2">
-          <button
-            className="text-sm font-semibold text-white hover:underline"
-            onClick={() => onUserClick(author, authorId)}
-            style={{ color: message.author?.color }}
-            type="button"
-          >
-            {author.username}
-          </button>
-          {mine && <span className="rounded bg-[#5865f2]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[#bdc3ff]">YOU</span>}
-          <time className="text-[11px] text-gray-500">{timestampDisplay}</time>
+          <button className="text-sm font-semibold hover:underline" onClick={() => onUser(displayUser, authorId)} style={{ color: displayColor || '#fff' }} type="button">{displayUser.username}</button>
+          {masq && <span className="rounded bg-[#f0b232]/20 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#f0b232]">BOT</span>}
+          {mine && !masq && <span className="rounded bg-[#5865f2]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[#bdc3ff]">YOU</span>}
+          <time className="text-[11px] text-gray-500">{ts}</time>
           {message.edited && <span className="text-[10px] text-gray-500">(edited)</span>}
         </div>
 
-        {isEditing ? (
+        {editing ? (
           <div className="mt-1 rounded bg-[#383a40] p-2">
-            <textarea
-              ref={editAreaRef}
-              className="composer-textarea w-full bg-transparent text-gray-200 text-sm focus:outline-none mb-2 resize-none"
-              value={editContent}
-              rows={1}
-              autoFocus
-              onChange={(e) => setEditContent(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEdit(); }
-                if (e.key === 'Escape') cancelEdit();
-              }}
-            />
-            <div className="text-xs text-gray-400 flex gap-2">
-              <span className="flex-1">esc to cancel · enter to save</span>
-              <button onClick={cancelEdit} className="hover:underline text-[#ed4245]">cancel</button>
-              <button onClick={saveEdit}   className="hover:underline text-[#5865f2]">save</button>
-            </div>
+            <textarea ref={editRef} className="composer-textarea w-full bg-transparent text-gray-200 text-sm focus:outline-none mb-1 resize-none" rows={1} value={editVal} autoFocus
+              onChange={(e) => setEditVal(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (editVal.trim() !== message.content) onEdit(message._id, editVal); setEditing(false); } if (e.key === 'Escape') setEditing(false); }} />
+            <div className="text-[11px] text-gray-400 flex gap-2"><span className="flex-1">esc cancel · enter save</span><button onClick={() => setEditing(false)} className="text-[#ed4245] hover:underline">cancel</button><button onClick={() => { if (editVal.trim() !== message.content) onEdit(message._id, editVal); setEditing(false); }} className="text-[#5865f2] hover:underline">save</button></div>
           </div>
-        ) : (
-          message.content
-            ? <p className="whitespace-pre-wrap break-words text-sm text-gray-200">
-                {renderMessageContent(message.content, users, channels, onUserClick, customEmojiById, cdnUrl, onRequestOpenLink)}
-              </p>
-            : null
-        )}
+        ) : message.content ? (
+          <p className="whitespace-pre-wrap break-words text-sm text-gray-200">{renderContent(message.content, users, channels, onUser, ceById, cdn, openLink)}</p>
+        ) : null}
 
-        {resolvedImages.length > 0 && (
+        {/* API embeds */}
+        {Array.isArray(message.embeds) && message.embeds.map((em, i) => <UrlEmbed key={i} embed={em} cdn={cdn} openLink={openLink} />)}
+
+        {/* Inline image resolution from plain-text URLs */}
+        {resolvedImgs.length > 0 && !message.embeds?.length && (
           <div className="mt-1.5 flex flex-wrap gap-2">
-            {resolvedImages.map((img, idx) => (
-              <button
-                className="block overflow-hidden rounded-lg border border-[#2f3237] hover:border-[#4a4d55] transition-colors"
-                key={`${img.url}-${idx}`}
-                onClick={() => onRequestOpenLink(img.url)}
-                title={img.url}
-                type="button"
-              >
-                <img alt="Embed" className="max-h-64 max-w-full object-contain" src={img.src} loading="lazy" />
+            {resolvedImgs.map((img, i) => (
+              <button key={i} className="block overflow-hidden rounded-lg border border-[#2f3237] hover:border-[#4a4d55] transition-colors" onClick={() => openLink(img.u)} type="button">
+                <img alt="" className="max-h-64 max-w-full object-contain" src={img.src} loading="lazy" />
               </button>
             ))}
           </div>
         )}
 
+        {/* Attachments */}
         {Array.isArray(message.attachments) && message.attachments.length > 0 && (
           <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {message.attachments.map((attachment, index) => {
-              const { attachmentId, filename, url, image } = getAttachmentData(attachment, cdnUrl, index);
-              if (!attachmentId || !url) return null;
-              if (image)
-                return <a className="block overflow-hidden rounded border border-[#3a3d42] hover:border-[#5c606a] transition-colors" href={url} key={attachmentId} rel="noreferrer" target="_blank" title={filename}><img alt={filename} className="max-h-64 max-w-full object-contain" src={url} /></a>;
-              return <a className="rounded bg-[#232428] px-2 py-1 text-xs text-[#bdc3ff] hover:bg-[#2f3136]" href={url} key={attachmentId} rel="noreferrer" target="_blank">📎 {filename}</a>;
+            {message.attachments.map((a, i) => {
+              const { id, fn, url, img } = attachData(a, cdn, i); if (!id || !url) return null;
+              return img
+                ? <a key={id} href={url} target="_blank" rel="noreferrer" className="block overflow-hidden rounded border border-[#3a3d42] hover:border-[#5c606a] transition-colors"><img alt={fn} className="max-h-64 max-w-full object-contain" src={url} /></a>
+                : <a key={id} href={url} target="_blank" rel="noreferrer" className="rounded bg-[#232428] px-2 py-1 text-xs text-[#bdc3ff] hover:bg-[#2f3136] flex items-center gap-1">📎 {fn}</a>;
             })}
           </div>
         )}
 
-        <div className="mt-1 flex flex-wrap items-center gap-1.5">
-          {messageReactions.map(({ emoji, userIds }) => {
-            const reacted    = userIds.includes(me);
-            const customEmoji = resolveCustomEmojiMeta(emoji, customEmojiById);
+        {/* Reactions */}
+        <div className="mt-1 flex flex-wrap items-center gap-1">
+          {reactions.map(({ emoji, ids }) => {
+            const reacted = ids.includes(me);
+            const ce = resolveCE(emoji, ceById);
             return (
-              <button
-                className={`reaction-btn rounded-full border px-2 py-0.5 text-xs flex items-center gap-1 ${reacted ? 'border-[#5865f2] bg-[#5865f2]/20 text-[#d7ddff]' : 'border-[#4c4f56] bg-[#2b2d31] text-gray-200 hover:bg-[#35373c]'}`}
-                key={emoji}
-                onClick={() => onToggleReaction(message, emoji, reacted)}
-                title={customEmoji?.name || emoji}
-                type="button"
-              >
-                {renderEmojiVisual(emoji, customEmoji, cdnUrl)} {userIds.length}
+              <button key={emoji} className={`reaction-btn rounded-full border px-2 py-0.5 text-xs flex items-center gap-1 ${reacted ? 'border-[#5865f2] bg-[#5865f2]/20 text-[#d7ddff]' : 'border-[#4c4f56] bg-[#2b2d31] text-gray-200 hover:bg-[#35373c]'}`}
+                onClick={() => onReact(message, emoji, reacted)} title={ce?.name || emoji} type="button">
+                {renderEmojiVis(emoji, ce, cdn)} {ids.length}
               </button>
             );
           })}
         </div>
       </div>
 
-      {/* Message action bar */}
-      <div className={`absolute right-4 -top-3 z-10 transition-opacity duration-100 ${isMessageHovered || showReactionPicker ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+      {/* Hover action bar */}
+      <div className={`absolute right-4 -top-3 z-10 transition-opacity duration-100 ${hovered || pickerOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
         <div className="flex items-center bg-[#313338] border border-[#2f3237] rounded-md shadow-md">
           <button className="p-1.5 text-gray-400 hover:text-gray-200 hover:bg-[#404249] rounded-l-md" onClick={() => onReply(message)} title="Reply"><Reply size={14} /></button>
-          <button className="p-1.5 text-gray-400 hover:text-gray-200 hover:bg-[#404249]" onClick={() => setShowReactionPicker((p) => !p)} title="Add Reaction"><Smile size={14} /></button>
-          {mine && (
-            <>
-              <button className="p-1.5 text-gray-400 hover:text-gray-200 hover:bg-[#404249]" onClick={startEditing} title="Edit"><Edit2 size={14} /></button>
-              <button className="p-1.5 text-red-400 hover:text-red-200 hover:bg-[#404249] rounded-r-md" onClick={() => onDeleteMessage(message._id)} title="Delete"><Trash2 size={14} /></button>
-            </>
-          )}
+          <button className="p-1.5 text-gray-400 hover:text-gray-200 hover:bg-[#404249]" onClick={() => setPickerOpen((p) => !p)} title="React"><span className="text-sm leading-none">😊</span></button>
+          {mine && <>
+            <button className="p-1.5 text-gray-400 hover:text-gray-200 hover:bg-[#404249]" onClick={() => { setEditVal(message.content || ''); setEditing(true); setPickerOpen(false); }} title="Edit"><Edit2 size={14} /></button>
+            <button className="p-1.5 text-red-400 hover:text-red-200 hover:bg-[#404249] rounded-r-md" onClick={() => onDelete(message._id)} title="Delete"><Trash2 size={14} /></button>
+          </>}
         </div>
       </div>
 
       {/* Reaction picker */}
-      {showReactionPicker && (
-        <div
-          ref={pickerRef}
-          className="absolute right-0 bottom-8 z-30 w-72 max-h-72 rounded-lg border border-[#4c4f56] bg-[#232428] shadow-2xl overflow-hidden flex flex-col"
-          onMouseLeave={() => setShowReactionPicker(false)}
-        >
-          <div className="p-2 border-b border-[#2f3237]">
-            <input
-              className="w-full rounded bg-[#1e1f22] px-2 py-1 text-xs text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-[#5865f2]"
-              placeholder="Search custom emojis…"
-              value={emojiSearch}
-              onChange={(e) => setEmojiSearch(e.target.value)}
-            />
+      {pickerOpen && (
+        <div ref={pickerRef} className="absolute right-0 bottom-8 z-30 w-72 max-h-72 rounded-lg border border-[#4c4f56] bg-[#232428] shadow-2xl overflow-hidden flex flex-col">
+          <div className="p-2 border-b border-[#2f3237] shrink-0">
+            <input className="w-full rounded bg-[#1e1f22] px-2 py-1 text-xs text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-[#5865f2]" placeholder="Search custom emojis…" value={emojiQ} onChange={(e) => setEmojiQ(e.target.value)} />
           </div>
           <div className="overflow-y-auto p-2">
-            {emojiSearch ? (
-              <>
-                {(filteredReactionEmojis?.length ?? 0) > 0 ? (
-                  <>
-                    <p className="mb-1 px-1 text-[10px] uppercase tracking-wide text-gray-500 font-bold">Custom</p>
-                    <div className="grid grid-cols-8 gap-1">
-                      {filteredReactionEmojis.map((option) => (
-                        <button
-                          className="grid h-8 place-items-center rounded hover:bg-[#3a3d42]"
-                          key={option.value}
-                          onClick={() => { onToggleReaction(message, option.value, message.reactions?.[option.value]?.includes(me)); setShowReactionPicker(false); }}
-                          title={option.title}
-                          type="button"
-                        >
-                          {renderEmojiVisual(option.value, option.custom, cdnUrl)}
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                ) : (
-                  <p className="text-xs text-gray-500 text-center py-4">No custom emojis match "{emojiSearch}"</p>
-                )}
-              </>
+            {emojiQ ? (
+              filtered?.length ? (
+                <div className="grid grid-cols-8 gap-1">{filtered.map((o) => <button key={o.value} className="grid h-8 place-items-center rounded hover:bg-[#3a3d42]" onClick={() => { onReact(message, o.value, message.reactions?.[o.value]?.includes(me)); setPickerOpen(false); }} title={o.title} type="button">{renderEmojiVis(o.value, o.custom, cdn)}</button>)}</div>
+              ) : <p className="text-center py-4 text-xs text-gray-500">No match for "{emojiQ}"</p>
             ) : (
               <>
-                <p className="mb-1 px-1 text-[10px] uppercase tracking-wide text-gray-500 font-bold sticky top-0 bg-[#232428] z-10">Standard</p>
-                <div className="grid grid-cols-8 gap-1 mb-2">
-                  {STANDARD_EMOJIS.map((emoji) => (
-                    <button
-                      className="grid h-8 place-items-center rounded hover:bg-[#3a3d42]"
-                      key={emoji}
-                      onClick={() => { onToggleReaction(message, emoji, message.reactions?.[emoji]?.includes(me)); setShowReactionPicker(false); }}
-                      type="button"
-                    >
-                      {renderTwemoji(emoji, 'w-5 h-5')}
-                    </button>
-                  ))}
-                </div>
-                {reactionOptions.some((o) => o.custom) && (
-                  <>
-                    <p className="mb-1 px-1 text-[10px] uppercase tracking-wide text-gray-500 font-bold sticky top-0 bg-[#232428] z-10">Custom</p>
-                    <div className="grid grid-cols-8 gap-1">
-                      {reactionOptions.filter((o) => o.custom).map((option) => (
-                        <button
-                          className="grid h-8 place-items-center rounded hover:bg-[#3a3d42]"
-                          key={option.value}
-                          onClick={() => { onToggleReaction(message, option.value, message.reactions?.[option.value]?.includes(me)); setShowReactionPicker(false); }}
-                          title={option.title}
-                          type="button"
-                        >
-                          {renderEmojiVisual(option.value, option.custom, cdnUrl)}
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
+                <p className="mb-1 px-1 text-[10px] font-bold uppercase tracking-wide text-gray-500 sticky top-0 bg-[#232428]">Standard</p>
+                <div className="grid grid-cols-8 gap-1 mb-2">{STD_EMOJI.map((e) => <button key={e} className="grid h-8 place-items-center rounded hover:bg-[#3a3d42]" onClick={() => { onReact(message, e, message.reactions?.[e]?.includes(me)); setPickerOpen(false); }} type="button">{renderTwemoji(e, 'w-5 h-5')}</button>)}</div>
+                {reactOpts.some((o) => o.custom) && <>
+                  <p className="mb-1 px-1 text-[10px] font-bold uppercase tracking-wide text-gray-500 sticky top-0 bg-[#232428]">Custom</p>
+                  <div className="grid grid-cols-8 gap-1">{reactOpts.filter((o) => o.custom).map((o) => <button key={o.value} className="grid h-8 place-items-center rounded hover:bg-[#3a3d42]" onClick={() => { onReact(message, o.value, message.reactions?.[o.value]?.includes(me)); setPickerOpen(false); }} title={o.title} type="button">{renderEmojiVis(o.value, o.custom, cdn)}</button>)}</div>
+                </>}
               </>
             )}
           </div>
@@ -844,615 +622,690 @@ const Message = memo(({
 
 // ─── AppShell ─────────────────────────────────────────────────────────────────
 function AppShell() {
-  const [view,    setView]    = useState('loading');
-  const [status,  setStatus]  = useState('disconnected');
-  const [config,  setConfig]  = useState({ apiUrl: DEFAULT_API_URL, wsUrl: DEFAULT_WS_URL, cdnUrl: DEFAULT_CDN_URL });
-  const [auth,    setAuth]    = useState({ token: null, userId: null });
-  const [peekUser, setPeekUser] = useState(null);
+  // ── Core state ──
+  const [view,    setView]   = useState('loading');
+  const [status,  setStatus] = useState('disconnected');
+  const [config,  setConfig] = useState({ apiUrl: DEF_API, wsUrl: DEF_WS, cdnUrl: DEF_CDN });
+  const [auth,    setAuth]   = useState({ token: null, userId: null });
 
-  const openUserProfile = useCallback((user, fallbackId = null) => {
-    const stableId = user?._id || fallbackId || 'unknown-user';
-    setPeekUser({ ...user, _id: stableId, username: user?.username || 'Loading user…', discriminator: user?.discriminator || '0000' });
-  }, []);
+  // ── Data ──
+  const [servers,  setServers]  = useState({});
+  const [channels, setChannels] = useState({});
+  const [users,    setUsers]    = useState({});
+  const [members,  setMembers]  = useState({});
+  const [messages, setMessages] = useState({});
 
-  const [servers,           setServers]           = useState({});
-  const [channels,          setChannels]          = useState({});
-  const [users,             setUsers]             = useState({});
-  const [members,           setMembers]           = useState({});
-  const [messages,          setMessages]          = useState({});
-  const [selectedServerId,  setSelectedServerId]  = useState('@me');
-  const [selectedChannelId, setSelectedChannelId] = useState('friends');
-  const [inputText,         setInputText]         = useState('');
-  const [showAdvanced,      setShowAdvanced]      = useState(false);
-  const [activeModal,       setActiveModal]       = useState(null);
-  const [createServerName,  setCreateServerName]  = useState('');
-  const [isMembersLoading,  setIsMembersLoading]  = useState(false);
-  const [replyingTo,        setReplyingTo]        = useState(null);
-  const [showEmojiPicker,   setShowEmojiPicker]   = useState(false);
-  const [emojiSearch,       setEmojiSearch]       = useState('');
-  const [pendingFiles,      setPendingFiles]      = useState([]);
-  const [isUploadingFiles,  setIsUploadingFiles]  = useState(false);
-  const [voiceNotice,       setVoiceNotice]       = useState('');
-  const [showGoLatest,      setShowGoLatest]      = useState(false);
-  const [isLoadingOlder,    setIsLoadingOlder]    = useState(false);
-  const [linkPromptUrl,     setLinkPromptUrl]     = useState(null);
-  const [statusDraft,       setStatusDraft]       = useState({ presence: 'Online', text: '' });
-  const [isSavingStatus,    setIsSavingStatus]    = useState(false);
-  const [isAccountHovered,  setIsAccountHovered]  = useState(false);
+  // ── Navigation ──
+  const [selServer,  setSelServer]  = useState('@me');
+  const [selChannel, setSelChannel] = useState('friends');
+
+  // ── UI state ──
+  const [inputText,       setInputText]       = useState('');
+  const [showAdvanced,    setShowAdvanced]     = useState(false);
+  const [activeModal,     setActiveModal]     = useState(null);
+  const [peekUser,        setPeekUser]        = useState(null);
+  const [replyingTo,      setReplyingTo]      = useState(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [emojiSearch,     setEmojiSearch]     = useState('');
+  const [pendingFiles,    setPendingFiles]    = useState([]);
+  const [isUploading,     setIsUploading]     = useState(false);
+  const [voiceNotice,     setVoiceNotice]     = useState('');
+  const [showGoLatest,    setShowGoLatest]    = useState(false);
+  const [isLoadingOlder,  setIsLoadingOlder]  = useState(false);
+  const [linkPromptUrl,   setLinkPromptUrl]   = useState(null);
+  const [isMembLoading,   setIsMembLoading]   = useState(false);
+  const [showMobileSide,  setShowMobileSide]  = useState(false);
+  const [isAccHovered,    setIsAccHovered]    = useState(false);
+  const [pinnedMessages,  setPinnedMessages]  = useState([]);
+  const [collapsedCats,   setCollapsedCats]   = useState({});
+
+  // ── Typing ──
+  const [typingInChannel, setTypingInChannel] = useState({}); // channelId → Set<userId>
+
+  // ── Unread ──
+  const [unreadChannels,  setUnreadChannels]  = useState(new Set()); // Set<channelId>
+
+  // ── Status modal ──
+  const [statusDraft, setStatusDraft] = useState({ presence: 'Online', text: '' });
+  const [savingStatus, setSavingStatus] = useState(false);
+
+  // ── Server settings modal ──
   const [editServerName,    setEditServerName]    = useState('');
   const [isUpdatingServer,  setIsUpdatingServer]  = useState(false);
-  const [loginMode,         setLoginMode]         = useState('credentials');
-  const [email,             setEmail]             = useState('');
-  const [password,          setPassword]          = useState('');
-  const [mfaCode,           setMfaCode]           = useState('');
-  const [manualToken,       setManualToken]       = useState('');
-  const [loginError,        setLoginError]        = useState('');
-  const [isLoggingIn,       setIsLoggingIn]       = useState(false);
-  const [privacyConsent,    setPrivacyConsent]    = useState(false);
-  const [wsReconnectAttempt, setWsReconnectAttempt] = useState(0);
-  const [showMobileSidebar, setShowMobileSidebar] = useState(false);
 
-  // ── Refs ──────────────────────────────────────────────────────────────────
-  const wsRef                        = useRef(null);
-  const messagesBottomRef            = useRef(null);
-  const messagesContainerRef         = useRef(null);
-  const subscriptionRef              = useRef({});
-  const preloadedChannelRef          = useRef({});
-  const preloadedMembersRef          = useRef({});
-  const pendingUserFetchRef          = useRef(new Set());
-  const membersLoadIdRef             = useRef(0);
-  const canFetchMissingUsersRef      = useRef(true);
-  const loggedMissingUserFetchErrorRef = useRef(false);
-  const wsReconnectTimeoutRef        = useRef(null);
-  const messageRefs                  = useRef({});
-  const replyMessageCacheRef         = useRef({});
-  const fileInputRef                 = useRef(null);
-  const autoFollowRef                = useRef(true);
-  const isProgrammaticScrollRef      = useRef(false);
-  const pickerRef                    = useRef(null);
-  const composerRef                  = useRef(null);
-  const applyEventRef                = useRef(null);   // ← stale-closure fix
-  const isLoadingOlderRef            = useRef(false);
-  // Kept-fresh refs for scroll handler
-  const currentMessagesRef           = useRef([]);
-  const fetchMessagesRef             = useRef(null);
-  const selectedChannelIdRef         = useRef(selectedChannelId);
+  // ── Create server modal ──
+  const [createServerName, setCreateServerName] = useState('');
 
-  // Auto-resize composer textarea
+  // ── Invite modal ──
+  const [inviteCode,     setInviteCode]     = useState('');
+  const [inviteCreated,  setInviteCreated]  = useState('');
+  const [inviteError,    setInviteError]    = useState('');
+  const [joinLoading,    setJoinLoading]    = useState(false);
+  const [copiedInvite,   setCopiedInvite]   = useState(false);
+
+  // ── Login ──
+  const [loginMode,     setLoginMode]     = useState('credentials');
+  const [email,         setEmail]         = useState('');
+  const [password,      setPassword]      = useState('');
+  const [mfaCode,       setMfaCode]       = useState('');
+  const [manualToken,   setManualToken]   = useState('');
+  const [loginError,    setLoginError]    = useState('');
+  const [isLoggingIn,   setIsLoggingIn]   = useState(false);
+  const [privacyConsent,setPrivacyConsent]= useState(false);
+  const [wsReconnect,   setWsReconnect]   = useState(0);
+
+  // ── Refs ──
+  const wsRef              = useRef(null);
+  const botRef             = useRef(null);   // messages bottom
+  const scrollRef          = useRef(null);   // messages container
+  const subRef             = useRef({});
+  const preloadChRef       = useRef({});
+  const preloadMembRef     = useRef({});
+  const pendingUsersRef    = useRef(new Set());
+  const membLoadIdRef      = useRef(0);
+  const canFetchUsersRef   = useRef(true);
+  const loggedFetchErrRef  = useRef(false);
+  const wsReconTimRef      = useRef(null);
+  const msgRefs            = useRef({});
+  const replyCacheRef      = useRef({});
+  const fileInputRef       = useRef(null);
+  const autoFollowRef      = useRef(true);
+  const isPgScrollRef      = useRef(false);
+  const pickerRef          = useRef(null);
+  const composerRef        = useRef(null);
+  const applyEventRef      = useRef(null);
+  const isLoadOlderRef     = useRef(false);
+  const typingTimersRef    = useRef({});       // channelId:userId → timeout
+  const sendTypingTimRef   = useRef(null);
+  const lastTypingRef      = useRef(0);
+  const curMsgsRef         = useRef([]);
+  const fetchMsgsRef       = useRef(null);
+  const selChannelRef      = useRef(selChannel);
+  selChannelRef.current = selChannel;
+
+  // ── Composer resize ──
   useEffect(() => {
-    const el = composerRef.current;
-    if (!el) return;
+    const el = composerRef.current; if (!el) return;
     el.style.height = 'auto';
     el.style.height = Math.min(el.scrollHeight, 200) + 'px';
   }, [inputText]);
 
-  // Emoji picker outside-click
+  // ── Emoji picker outside-click ──
   useEffect(() => {
     if (!showEmojiPicker) { setEmojiSearch(''); return; }
-    const handler = (e) => { if (pickerRef.current && !pickerRef.current.contains(e.target)) setShowEmojiPicker(false); };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    const h = (e) => { if (pickerRef.current && !pickerRef.current.contains(e.target)) setShowEmojiPicker(false); };
+    document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h);
   }, [showEmojiPicker]);
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
-  const isSameOriginApi = useMemo(() => {
-    try { return new URL(config.apiUrl).origin === window.location.origin; } catch { return false; }
-  }, [config.apiUrl]);
+  // ── Helpers ──
+  const sameOrigin = useMemo(() => { try { return new URL(config.apiUrl).origin === window.location.origin; } catch { return false; } }, [config.apiUrl]);
 
   const upsertUsers = useCallback((list = []) => {
     if (!list.length) return;
-    setUsers((prev) => { const next = { ...prev }; list.forEach((u) => { if (u?._id) next[u._id] = u; }); return next; });
+    setUsers((p) => { const n = { ...p }; list.forEach((u) => { if (u?._id) n[u._id] = u; }); return n; });
   }, []);
 
+  const upsertUsersFromMsgs = useCallback((msgs = []) => {
+    const em = [];
+    msgs.forEach((m) => {
+      if (m?.author && typeof m.author === 'object' && m.author._id) em.push(m.author);
+      if (m?.user?._id) em.push(m.user);
+    });
+    upsertUsers(em);
+  }, [upsertUsers]);
+
   const renderMemberItem = useCallback((item) => {
-    if (item.type === 'header')
-      return <div className="pt-4 pb-1 px-4 text-xs font-bold uppercase tracking-wide text-gray-400">{item.name} — {item.count}</div>;
-    const member   = item.data;
-    const mUser    = member.user || { _id: member?._id?.user, username: 'Loading user…', _loading: true };
-    const isLoading = !member.user;
+    if (item.type === 'header') return (
+      <div className="flex items-center px-4 text-xs font-bold uppercase tracking-wide text-gray-400 h-full">
+        {item.name} — {item.count}
+      </div>
+    );
+    const m = item.data;
+    const mu = m.user || { _id: m?._id?.user, username: 'Loading…' };
     return (
-      <button className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-[#35373c]" onClick={() => openUserProfile(mUser, member._id.user)}>
-        <Avatar animateOnHover cdnUrl={config.cdnUrl} size="sm" user={mUser} />
+      <button className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-[#35373c] h-full" onClick={() => setPeekUser({ ...mu, _id: mu._id || m._id.user })}>
+        <Avatar user={mu} cdn={config.cdnUrl} size="sm" hover />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium" style={{ color: member.color || '#f2f3f5' }}>{member.nickname || mUser.username}</div>
-          {isLoading
-            ? <div className="mt-1 h-1.5 w-24 overflow-hidden rounded-full bg-[#242A35]"><div className="h-full w-1/2 animate-pulse rounded-full bg-[#8AB4F8]" /></div>
-            : <div className="flex items-center gap-1 text-[11px] text-gray-500"><User size={11} /> {mUser.status?.presence || 'Offline'}</div>
+          <div className="truncate text-sm font-medium" style={{ color: m.color || '#f2f3f5' }}>{m.nickname || mu.username}</div>
+          {mu._loading
+            ? <div className="mt-0.5 h-1.5 w-16 rounded-full bg-[#242A35] overflow-hidden"><div className="h-full w-1/2 animate-pulse rounded-full bg-[#8AB4F8]" /></div>
+            : <div className="flex items-center gap-1 text-[11px] text-gray-500"><span className={`w-1.5 h-1.5 rounded-full inline-block shrink-0 ${mu.status?.presence === 'Online' ? 'bg-[#3ba55d]' : mu.status?.presence === 'Busy' ? 'bg-[#ed4245]' : mu.status?.presence === 'Idle' ? 'bg-[#f0b232]' : 'bg-gray-500'}`} />{mu.status?.text || mu.status?.presence || 'Offline'}</div>
           }
         </div>
       </button>
     );
-  }, [config.cdnUrl, openUserProfile]);
+  }, [config.cdnUrl]);
 
-  const upsertUsersFromMessages = useCallback((messageList = []) => {
-    const embedded = [];
-    messageList.forEach((entry) => {
-      if (entry?.author && typeof entry.author === 'object' && entry.author._id) embedded.push(entry.author);
-      if (entry?.user?._id) embedded.push(entry.user);
-    });
-    upsertUsers(embedded);
-  }, [upsertUsers]);
-
+  // ── Fetch helpers ──
   const fetchMembers = useCallback(async (serverId) => {
     if (serverId === '@me') return;
-    const loadId = Date.now();
-    membersLoadIdRef.current = loadId;
-    setIsMembersLoading(true);
+    const lid = Date.now(); membLoadIdRef.current = lid; setIsMembLoading(true);
     try {
       const res = await fetch(`${config.apiUrl}/servers/${serverId}/members`, { headers: { 'x-session-token': auth.token } });
       if (!res.ok) return;
       const data = await res.json();
       upsertUsers(data.users || []);
-      const payloadMembers = data.members || [];
-      for (let i = 0; i < payloadMembers.length; i += MEMBER_HYDRATE_CHUNK) {
-        if (membersLoadIdRef.current !== loadId) break;
-        const chunk = payloadMembers.slice(i, i + MEMBER_HYDRATE_CHUNK);
-        setMembers((prev) => { const next = { ...prev }; chunk.forEach((m) => { next[`${m._id.server}:${m._id.user}`] = m; }); return next; });
-        if (i + MEMBER_HYDRATE_CHUNK < payloadMembers.length) await new Promise((r) => setTimeout(r, 0));
+      const pm = data.members || [];
+      for (let i = 0; i < pm.length; i += MEMBER_CHUNK) {
+        if (membLoadIdRef.current !== lid) break;
+        const chunk = pm.slice(i, i + MEMBER_CHUNK);
+        setMembers((p) => { const n = { ...p }; chunk.forEach((m) => { n[`${m._id.server}:${m._id.user}`] = m; }); return n; });
+        if (i + MEMBER_CHUNK < pm.length) await new Promise((r) => setTimeout(r, 0));
       }
-    } catch {} finally {
-      if (membersLoadIdRef.current === loadId) setIsMembersLoading(false);
-    }
+    } catch {} finally { if (membLoadIdRef.current === lid) setIsMembLoading(false); }
   }, [auth.token, config.apiUrl, upsertUsers]);
 
-  const fetchMissingUsers = useCallback(async (messageList = []) => {
-    if (!canFetchMissingUsersRef.current || !isSameOriginApi) return;
-    const unresolved = new Set();
-    messageList.forEach((entry) => {
-      const authorId = typeof entry?.author === 'string' ? entry.author : entry?.author?._id;
-      if (authorId && authorId !== '00000000000000000000000000' && !users[authorId] && !pendingUserFetchRef.current.has(authorId))
-        unresolved.add(authorId);
+  const fetchMissingUsers = useCallback(async (msgs = []) => {
+    if (!canFetchUsersRef.current || !sameOrigin) return;
+    const need = new Set();
+    msgs.forEach((m) => {
+      const aid = typeof m?.author === 'string' ? m.author : m?.author?._id;
+      if (aid && aid !== '00000000000000000000000000' && !users[aid] && !pendingUsersRef.current.has(aid)) need.add(aid);
     });
-    if (!unresolved.size) return;
-    const ids = [...unresolved].slice(0, 6);
-    ids.forEach((id) => pendingUserFetchRef.current.add(id));
-    await Promise.all(ids.map(async (userId) => {
+    if (!need.size) return;
+    const ids = [...need].slice(0, 8);
+    ids.forEach((id) => pendingUsersRef.current.add(id));
+    await Promise.all(ids.map(async (uid) => {
       try {
-        const res = await fetch(`${config.apiUrl}/users/${userId}`, { headers: { 'x-session-token': auth.token } });
-        if (!res.ok) { if (res.status === 401 || res.status === 403 || res.status === 405) canFetchMissingUsersRef.current = false; return; }
-        const data = await res.json();
-        if (data?._id) upsertUsers([data]);
+        const r = await fetch(`${config.apiUrl}/users/${uid}`, { headers: { 'x-session-token': auth.token } });
+        if (!r.ok) { if ([401,403,405].includes(r.status)) canFetchUsersRef.current = false; return; }
+        const d = await r.json(); if (d?._id) upsertUsers([d]);
       } catch (err) {
         const msg = err?.message || '';
-        if (msg.includes('Failed to fetch') || msg.includes('CORS')) canFetchMissingUsersRef.current = false;
-        if (!loggedMissingUserFetchErrorRef.current) { loggedMissingUserFetchErrorRef.current = true; console.warn('Disabling background user lookup due to network/CORS restrictions.'); }
-      } finally { pendingUserFetchRef.current.delete(userId); }
+        if (msg.includes('Failed to fetch') || msg.includes('CORS')) canFetchUsersRef.current = false;
+        if (!loggedFetchErrRef.current) { loggedFetchErrRef.current = true; console.warn('Background user fetch disabled.'); }
+      } finally { pendingUsersRef.current.delete(uid); }
     }));
-  }, [auth.token, config.apiUrl, isSameOriginApi, upsertUsers, users]);
+  }, [auth.token, config.apiUrl, sameOrigin, upsertUsers, users]);
 
-  const fetchReplyMessage = useCallback(async (channelId, replyId) => {
-    if (!channelId || !replyId || replyMessageCacheRef.current[replyId]) return;
+  const fetchReplyMsg = useCallback(async (channelId, rid) => {
+    if (!channelId || !rid || replyCacheRef.current[rid]) return;
     try {
-      const res = await fetch(`${config.apiUrl}/channels/${channelId}/messages/${replyId}`, { headers: { 'x-session-token': auth.token } });
-      if (!res.ok) return;
-      const data = await res.json();
-      if (!data?._id) return;
-      replyMessageCacheRef.current[replyId] = data;
-      upsertUsersFromMessages([data]);
-      setMessages((prev) => ({ ...prev, [channelId]: [...(prev[channelId] || [])] }));
+      const r = await fetch(`${config.apiUrl}/channels/${channelId}/messages/${rid}`, { headers: { 'x-session-token': auth.token } });
+      if (!r.ok) return; const d = await r.json(); if (!d?._id) return;
+      replyCacheRef.current[rid] = d;
+      upsertUsersFromMsgs([d]);
+      setMessages((p) => ({ ...p, [channelId]: [...(p[channelId] || [])] }));
     } catch {}
-  }, [auth.token, config.apiUrl, upsertUsersFromMessages]);
+  }, [auth.token, config.apiUrl, upsertUsersFromMsgs]);
 
-  const fetchMessages = useCallback(async (channelId, beforeId = null) => {
-    if (!channelId || channelId === 'friends') return;
+  const fetchMessages = useCallback(async (chId, beforeId = null) => {
+    if (!chId || chId === 'friends') return;
     try {
-      const url = `${config.apiUrl}/channels/${channelId}/messages?limit=100${beforeId ? `&before=${beforeId}` : ''}`;
-      const res = await fetch(url, { headers: { 'x-session-token': auth.token } });
-      if (!res.ok) return;
-      const data = await res.json();
-      const payloadMessages = Array.isArray(data) ? data : data.messages || [];
-      const payloadUsers    = Array.isArray(data) ? [] : data.users || [];
-      if (payloadUsers.length) upsertUsers(payloadUsers);
-      upsertUsersFromMessages(payloadMessages);
-      const ordered = payloadMessages.reverse();
-      setMessages((prev) => {
-        const existing = prev[channelId] || [];
-        return {
-          ...prev,
-          [channelId]: beforeId
-            ? uniqueMessages([...ordered, ...existing])
-            : uniqueMessages(ordered),
-        };
-      });
+      const url = `${config.apiUrl}/channels/${chId}/messages?limit=100${beforeId ? `&before=${beforeId}` : ''}`;
+      const r = await fetch(url, { headers: { 'x-session-token': auth.token } });
+      if (!r.ok) return;
+      const data = await r.json();
+      const msgs  = Array.isArray(data) ? data : data.messages || [];
+      const usrs  = Array.isArray(data) ? [] : data.users || [];
+      if (usrs.length) upsertUsers(usrs);
+      upsertUsersFromMsgs(msgs);
+      const ordered = msgs.reverse();
+      setMessages((p) => ({
+        ...p,
+        [chId]: beforeId ? uniq([...ordered, ...(p[chId] || [])]) : uniq(ordered),
+      }));
       void fetchMissingUsers(ordered);
-      if (!beforeId) preloadedChannelRef.current[channelId] = true;
+      if (!beforeId) preloadChRef.current[chId] = true;
     } catch {}
-  }, [auth.token, config.apiUrl, upsertUsers, upsertUsersFromMessages, fetchMissingUsers]);
+  }, [auth.token, config.apiUrl, upsertUsers, upsertUsersFromMsgs, fetchMissingUsers]);
+  fetchMsgsRef.current = fetchMessages;
 
-  // ── Derived state ─────────────────────────────────────────────────────────
-  const serverList             = useMemo(() => Object.values(servers), [servers]);
-  const channelList            = useMemo(() => selectedServerId === '@me' ? [] : Object.values(channels).filter((ch) => ch.server === selectedServerId), [channels, selectedServerId]);
-  const directMessageChannels  = useMemo(() => Object.values(channels).filter((ch) => ch?.channel_type === 'DirectMessage'), [channels]);
-  const currentMessages        = useMemo(() => uniqueMessages(messages[selectedChannelId] || []), [messages, selectedChannelId]);
-  const currentMessageMap      = useMemo(() => Object.fromEntries(currentMessages.map((m) => [m._id, m])), [currentMessages]);
-  const globalReplyMessageMap  = useMemo(() => ({ ...currentMessageMap, ...replyMessageCacheRef.current }), [currentMessageMap]);
-  const activeReply            = useMemo(() => replyingTo ? currentMessageMap[replyingTo._id] || replyingTo : null, [replyingTo, currentMessageMap]);
-  const currentChannelName     = useMemo(() => {
-    if (selectedChannelId === 'friends') return 'friends';
-    const channel = channels[selectedChannelId];
-    if (channel?.name) return channel.name;
-    if (channel?.channel_type === 'DirectMessage') {
-      const recipientId = (channel.recipients || []).find((id) => id !== auth.userId);
-      return users[recipientId]?.username || 'direct-message';
+  // ── ACK a channel as read ──
+  const ackChannel = useCallback(async (chId, msgId) => {
+    if (!chId || !msgId || !auth.token) return;
+    setUnreadChannels((p) => { const n = new Set(p); n.delete(chId); return n; });
+    try { await fetch(`${config.apiUrl}/channels/${chId}/ack/${msgId}`, { method: 'PUT', headers: { 'x-session-token': auth.token } }); } catch {}
+  }, [auth.token, config.apiUrl]);
+
+  // ── Fetch pinned messages ──
+  const fetchPins = useCallback(async (chId) => {
+    if (!chId || chId === 'friends' || !auth.token) return;
+    try {
+      const r = await fetch(`${config.apiUrl}/channels/${chId}/pins`, { headers: { 'x-session-token': auth.token } });
+      if (!r.ok) return;
+      const data = await r.json();
+      const msgs = Array.isArray(data) ? data : data.messages || [];
+      upsertUsersFromMsgs(msgs);
+      setPinnedMessages(msgs);
+    } catch {}
+  }, [auth.token, config.apiUrl, upsertUsersFromMsgs]);
+
+  // ── Derived state ──
+  const serverList   = useMemo(() => Object.values(servers), [servers]);
+  const dmChannels   = useMemo(() => Object.values(channels).filter((c) => c?.channel_type === 'DirectMessage' || c?.channel_type === 'Group' || c?.channel_type === 'SavedMessages'), [channels]);
+  const curMsgs      = useMemo(() => uniq(messages[selChannel] || []), [messages, selChannel]);
+  const curMsgMap    = useMemo(() => Object.fromEntries(curMsgs.map((m) => [m._id, m])), [curMsgs]);
+  const replyMsgMap  = useMemo(() => ({ ...curMsgMap, ...replyCacheRef.current }), [curMsgMap]);
+  const activeReply  = useMemo(() => replyingTo ? curMsgMap[replyingTo._id] || replyingTo : null, [replyingTo, curMsgMap]);
+  curMsgsRef.current = curMsgs;
+
+  const curChName = useMemo(() => {
+    if (selChannel === 'friends') return 'Direct';
+    const ch = channels[selChannel];
+    if (ch?.name) return ch.name;
+    if (ch?.channel_type === 'DirectMessage') {
+      const rid = (ch.recipients || []).find((id) => id !== auth.userId);
+      return users[rid]?.username || 'DM';
     }
-    return 'select-a-channel';
-  }, [selectedChannelId, channels, auth.userId, users]);
-  const currentChannelTopic    = useMemo(() => channels[selectedChannelId]?.description || channels[selectedChannelId]?.topic || null, [channels, selectedChannelId]);
-  const allCurrentMembers      = useMemo(() => selectedServerId === '@me' ? [] : Object.values(members).filter((m) => m._id.server === selectedServerId), [members, selectedServerId]);
-  const friends                = useMemo(() => Object.values(users).filter((u) => u.relationship === 'Friend' || u.relationship === 1), [users]);
-  const selectedServer         = servers[selectedServerId];
-  const isServerOwner          = selectedServer?.owner === auth.userId;
-  const memberListItems        = useMemo(() => selectedServerId === '@me' || !selectedServer ? [] : organizeMembers(allCurrentMembers, selectedServer.roles || {}, users), [allCurrentMembers, selectedServer, users, selectedServerId]);
+    return 'channel';
+  }, [selChannel, channels, auth.userId, users]);
 
-  const allCustomEmojis = useMemo(() => {
+  const curChTopic = useMemo(() => channels[selChannel]?.description || channels[selChannel]?.topic || null, [channels, selChannel]);
+
+  const allMembers = useMemo(() => selServer === '@me' ? [] : Object.values(members).filter((m) => m._id.server === selServer), [members, selServer]);
+  const selServerObj = servers[selServer];
+  const isOwner = selServerObj?.owner === auth.userId;
+
+  const memberListItems = useMemo(() =>
+    selServer === '@me' || !selServerObj ? [] : organizeMembers(allMembers, selServerObj.roles || {}, users),
+    [allMembers, selServerObj, users, selServer]
+  );
+
+  // Friends: users with relationship Friend (1)
+  const friends = useMemo(() => Object.values(users).filter((u) => u.relationship === 'Friend' || u.relationship === 1), [users]);
+
+  // ── Custom emoji ──
+  const allCE = useMemo(() => {
     const all = [];
-    Object.values(servers).forEach((server) => {
-      const source  = server.emojis || server.emoji || [];
-      const entries = Array.isArray(source) ? source : Object.entries(source).map(([id, val]) => ({ id, ...val }));
-      entries.forEach((emoji) => {
-        if (emoji.id || emoji._id)
-          all.push({ id: emoji.id || emoji._id, name: emoji.name, serverName: server.name, animated: emoji.animated, isPrivate: server.discoverable === false });
-      });
+    Object.values(servers).forEach((s) => {
+      const src = s.emojis || s.emoji || [];
+      const entries = Array.isArray(src) ? src : Object.entries(src).map(([id, v]) => ({ id, ...v }));
+      entries.forEach((e) => { if (e.id || e._id) all.push({ id: e.id || e._id, name: e.name, serverName: s.name, isPrivate: s.discoverable === false }); });
     });
     return all;
   }, [servers]);
 
-  const customEmojiById = useMemo(() => {
-    const index = {};
-    Object.values(servers).forEach((server) => {
-      const source  = server?.emojis || server?.emoji || [];
-      const entries = Array.isArray(source)
-        ? source.map((e) => ({ id: e?._id || e?.id, name: e?.name }))
-        : Object.entries(source || {}).map(([id, e]) => ({ id, name: e?.name }));
-      entries.forEach((e) => { if (e?.id) index[e.id] = { id: e.id, name: e.name || e.id, serverName: server?.name, isPrivate: server?.discoverable === false }; });
+  const ceById = useMemo(() => {
+    const m = {};
+    Object.values(servers).forEach((s) => {
+      const src = s?.emojis || s?.emoji || [];
+      const entries = Array.isArray(src) ? src.map((e) => ({ id: e?._id || e?.id, name: e?.name })) : Object.entries(src || {}).map(([id, e]) => ({ id, name: e?.name }));
+      entries.forEach((e) => { if (e?.id) m[e.id] = { id: e.id, name: e.name || e.id, serverName: s?.name }; });
     });
-    return index;
+    return m;
   }, [servers]);
 
-  const reactionOptions = useMemo(() => {
-    const base = STANDARD_EMOJIS.map((emoji) => ({ value: emoji, label: emoji, title: emoji, custom: null }));
-    const serverSet = allCustomEmojis.map((emoji) => ({
-      value:  `:${emoji.id}:`,
-      label:  emoji.name,
-      title:  `${emoji.name} · ${emoji.isPrivate ? 'Private' : emoji.serverName}`,
-      custom: { id: emoji.id, name: emoji.name },
-    }));
-    return [...base, ...serverSet];
-  }, [allCustomEmojis]);
+  const reactOpts = useMemo(() => [
+    ...STD_EMOJI.map((e) => ({ value: e, label: e, title: e, custom: null })),
+    ...allCE.map((e) => ({ value: `:${e.id}:`, label: e.name, title: `${e.name} · ${e.serverName}`, custom: { id: e.id, name: e.name } })),
+  ], [allCE]);
 
-  const filteredComposerCustomEmojis = useMemo(() => {
-    if (!emojiSearch) return allCustomEmojis;
+  const filteredCE = useMemo(() => {
+    if (!emojiSearch) return allCE;
     const q = emojiSearch.toLowerCase();
-    return allCustomEmojis.filter((e) => e.name.toLowerCase().includes(q));
-  }, [emojiSearch, allCustomEmojis]);
+    return allCE.filter((e) => e.name.toLowerCase().includes(q));
+  }, [allCE, emojiSearch]);
 
-  // User profile peek helpers
-  const peekMember       = useMemo(() => !peekUser?._id || selectedServerId === '@me' ? null : members[`${selectedServerId}:${peekUser._id}`], [members, peekUser, selectedServerId]);
-  const peekRoles        = useMemo(() => !peekMember || !selectedServer?.roles ? [] : (peekMember.roles || []).map((roleId) => selectedServer.roles?.[roleId]).filter(Boolean), [peekMember, selectedServer]);
-  const peekBadges       = useMemo(() => {
+  // ── Typing users in current channel ──
+  const curTypingIds = useMemo(() => {
+    const s = typingInChannel[selChannel];
+    return s ? [...s].filter((id) => id !== auth.userId) : [];
+  }, [typingInChannel, selChannel, auth.userId]);
+
+  // ── Peek user state ──
+  const peekMember   = useMemo(() => !peekUser?._id || selServer === '@me' ? null : members[`${selServer}:${peekUser._id}`], [members, peekUser, selServer]);
+  const peekRoles    = useMemo(() => !peekMember || !selServerObj?.roles ? [] : (peekMember.roles || []).map((id) => selServerObj.roles?.[id]).filter(Boolean), [peekMember, selServerObj]);
+  const peekBadges   = useMemo(() => {
     if (!peekUser?.badges) return [];
     if (Array.isArray(peekUser.badges)) return peekUser.badges;
     if (typeof peekUser.badges === 'number') {
-      const flagMap = { 1: 'Developer', 2: 'Translator', 4: 'Supporter', 8: 'Founder', 16: 'Platform Moderation', 32: 'Active Supporter', 64: 'Paw' };
-      return Object.entries(flagMap).filter(([bit]) => (peekUser.badges & Number(bit)) === Number(bit)).map(([, label]) => label);
+      const F = { 1: 'Developer', 2: 'Translator', 4: 'Supporter', 8: 'Founder', 16: 'Platform Moderation', 32: 'Active Supporter', 64: 'Paw' };
+      return Object.entries(F).filter(([b]) => (peekUser.badges & Number(b)) === Number(b)).map(([, l]) => l);
     }
-    if (typeof peekUser.badges === 'object') return Object.entries(peekUser.badges).filter(([, v]) => Boolean(v)).map(([badge]) => badge);
+    if (typeof peekUser.badges === 'object') return Object.entries(peekUser.badges).filter(([, v]) => Boolean(v)).map(([k]) => k);
     return [];
   }, [peekUser]);
-  const peekAboutMe       = useMemo(() => peekUser?.profile?.content || peekUser?.profile?.bio || peekUser?.bio || null, [peekUser]);
-  const peekPlatformJoined = useMemo(() => getJoinedAt(peekUser), [peekUser]);
-  const peekServerJoined   = useMemo(() => getJoinedAt(peekMember), [peekMember]);
-  const peekBannerUrl      = useMemo(() => getBannerUrl(peekUser, config.cdnUrl), [peekUser, config.cdnUrl]);
+  const peekBio      = peekUser?.profile?.content || peekUser?.profile?.bio || peekUser?.bio || null;
+  const peekJoined   = joinedAt(peekUser);
+  const peekSrvJoined = joinedAt(peekMember);
+  const peekBanner   = bannerUrl(peekUser, config.cdnUrl);
 
-  // ── Config discovery ──────────────────────────────────────────────────────
+  // ── Category-grouped channel list ──
+  const categorisedChannels = useMemo(() => {
+    if (selServer === '@me') return [];
+    const serverChannels = Object.values(channels).filter((c) => c.server === selServer);
+    const cats = selServerObj?.categories || [];
+
+    // Build a set of all categorised channel IDs
+    const cated = new Set(cats.flatMap((cat) => cat.channels || []));
+
+    // Channels not in any category
+    const uncategorised = serverChannels.filter((c) => !cated.has(c._id));
+
+    const result = [];
+
+    // Uncategorised first (like Discord)
+    uncategorised.forEach((c) => result.push({ type: 'channel', channel: c }));
+
+    // Then each category
+    cats.forEach((cat) => {
+      if (!cat.channels?.length) return;
+      const catChannels = cat.channels.map((id) => channels[id]).filter(Boolean);
+      if (!catChannels.length) return;
+      result.push({ type: 'category', id: cat.id, title: cat.title, channels: catChannels });
+      if (!collapsedCats[cat.id]) {
+        catChannels.forEach((c) => result.push({ type: 'channel', channel: c }));
+      }
+    });
+
+    return result;
+  }, [selServer, channels, selServerObj, collapsedCats]);
+
+  // ── Config discovery ──
   const discoverConfig = async (apiUrl) => {
     try {
-      const res  = await fetch(apiUrl, { headers: { Accept: 'application/json' } });
-      if (!res.ok) return;
-      const data = await res.json();
-      setConfig((prev) => ({ ...prev, apiUrl, wsUrl: data.ws || prev.wsUrl, cdnUrl: data.features?.autumn?.url || prev.cdnUrl }));
+      const r = await fetch(apiUrl, { headers: { Accept: 'application/json' } });
+      if (!r.ok) return;
+      const d = await r.json();
+      setConfig((p) => ({ ...p, apiUrl, wsUrl: d.ws || p.wsUrl, cdnUrl: d.features?.autumn?.url || p.cdnUrl }));
     } catch {}
   };
 
-  // Restore session on mount
+  // ── Restore session ──
   useEffect(() => {
-    const savedToken  = getCookie(TOKEN_COOKIE_NAME) || localStorage.getItem('stoat_token');
-    const savedUserId = getCookie(USER_COOKIE_NAME)  || localStorage.getItem('stoat_user_id');
-    const savedApi    = getCookie(API_COOKIE_NAME)   || localStorage.getItem('stoat_api_url');
-    const api         = savedApi || DEFAULT_API_URL;
-    setConfig((prev) => ({ ...prev, apiUrl: api }));
+    const tk = getCookie(TK) || localStorage.getItem('stoat_token');
+    const uk = getCookie(UK) || localStorage.getItem('stoat_user_id');
+    const ak = getCookie(AK) || localStorage.getItem('stoat_api_url');
+    const api = ak || DEF_API;
+    setConfig((p) => ({ ...p, apiUrl: api }));
     discoverConfig(api);
-    if (savedToken && savedUserId) { setAuth({ token: savedToken, userId: savedUserId }); setView('app'); }
+    if (tk && uk) { setAuth({ token: tk, userId: uk }); setView('app'); }
     else setView('login');
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Event handler (plain fn — captured by ref every render) ──────────────
+  // ── Typing: send begin/end ──
+  const sendTypingBegin = useCallback(() => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN || !selChannel || selChannel === 'friends') return;
+    const now = Date.now();
+    if (now - lastTypingRef.current < 2500) return;
+    lastTypingRef.current = now;
+    ws.send(JSON.stringify({ type: 'BeginTyping', channel: selChannel }));
+  }, [selChannel]);
+
+  const sendTypingEnd = useCallback(() => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN || !selChannel) return;
+    ws.send(JSON.stringify({ type: 'EndTyping', channel: selChannel }));
+    lastTypingRef.current = 0;
+  }, [selChannel]);
+
+  // ── WS event handler (uses ref to avoid stale closures) ──
   const applyEvent = (packet) => {
     if (!packet?.type) return;
     switch (packet.type) {
       case 'Ready':
-        setUsers((prev) => { const n = { ...prev }; packet.users?.forEach((u) => { n[u._id] = u; }); return n; });
-        setServers((prev) => { const n = { ...prev }; packet.servers?.forEach((s) => { n[s._id] = s; }); return n; });
-        setChannels((prev) => { const n = { ...prev }; packet.channels?.forEach((c) => { n[c._id] = c; }); return n; });
-        setMembers((prev) => { const n = { ...prev }; packet.members?.forEach((m) => { n[`${m._id.server}:${m._id.user}`] = m; }); return n; });
+        setUsers((p) => { const n = { ...p }; packet.users?.forEach((u) => { n[u._id] = u; }); return n; });
+        setServers((p) => { const n = { ...p }; packet.servers?.forEach((s) => { n[s._id] = s; }); return n; });
+        setChannels((p) => { const n = { ...p }; packet.channels?.forEach((c) => { n[c._id] = c; }); return n; });
+        setMembers((p) => { const n = { ...p }; packet.members?.forEach((m) => { n[`${m._id.server}:${m._id.user}`] = m; }); return n; });
+        // Seed initial unread from channel last_message_id (simple heuristic)
         setStatus('ready');
         break;
-      case 'Bulk':          packet.v?.forEach((e) => applyEventRef.current?.(e)); break;
+      case 'Bulk': packet.v?.forEach((e) => applyEventRef.current?.(e)); break;
       case 'Authenticated': setStatus('authenticated'); break;
-      case 'Error':         setStatus(`error:${packet.error || 'unknown'}`); break;
-      case 'Logout':        logout(); break;
+      case 'Error': setStatus(`error:${packet.error || 'unknown'}`); break;
+      case 'Logout': logout(); break;
+      // Messages
       case 'Message':
-        upsertUsersFromMessages([packet]);
+        upsertUsersFromMsgs([packet]);
         void fetchMissingUsers([packet]);
-        setMessages((prev) => {
-          const list = prev[packet.channel] || [];
-          if (list.some((m) => m._id === packet._id)) return prev;
-          return { ...prev, [packet.channel]: uniqueMessages([...list, packet].slice(-200)) };
+        setMessages((p) => {
+          const list = p[packet.channel] || [];
+          if (list.some((m) => m._id === packet._id)) return p;
+          return { ...p, [packet.channel]: uniq([...list, packet].slice(-200)) };
         });
+        // Mark as unread if not currently viewing
+        if (packet.channel !== selChannelRef.current || document.hidden) {
+          setUnreadChannels((p) => { const n = new Set(p); n.add(packet.channel); return n; });
+        }
         break;
       case 'MessageUpdate':
-        setMessages((prev) => ({
-          ...prev,
-          [packet.channel]: uniqueMessages((prev[packet.channel] || []).map((m) => m._id === packet.id ? { ...m, ...packet.data, edited: new Date().toISOString() } : m)),
-        }));
+        setMessages((p) => ({ ...p, [packet.channel]: uniq((p[packet.channel] || []).map((m) => m._id === packet.id ? { ...m, ...packet.data, edited: new Date().toISOString() } : m)) }));
         break;
       case 'MessageDelete':
-        setMessages((prev) => ({ ...prev, [packet.channel]: (prev[packet.channel] || []).filter((m) => m._id !== packet.id) }));
+        setMessages((p) => ({ ...p, [packet.channel]: (p[packet.channel] || []).filter((m) => m._id !== packet.id) }));
         break;
-      case 'ChannelCreate': setChannels((prev) => ({ ...prev, [packet._id]: packet })); break;
-      case 'ChannelUpdate': setChannels((prev) => ({ ...prev, [packet.id]: withoutClearedFields({ ...prev[packet.id], ...packet.data }, packet.clear) })); break;
-      case 'ChannelDelete': setChannels((prev) => { const n = { ...prev }; delete n[packet.id]; return n; }); break;
-      case 'ServerCreate':  setServers((prev) => ({ ...prev, [packet._id]: packet })); break;
-      case 'ServerUpdate':  setServers((prev) => ({ ...prev, [packet.id]: withoutClearedFields({ ...prev[packet.id], ...packet.data }, packet.clear) })); break;
+      case 'MessageReact':
+        setMessages((p) => ({
+          ...p,
+          [packet.channel_id]: uniq((p[packet.channel_id] || []).map((m) => {
+            if (m._id !== packet.id) return m;
+            const existing = m.reactions?.[packet.emoji_id] || [];
+            return { ...m, reactions: { ...(m.reactions || {}), [packet.emoji_id]: [...new Set([...existing, packet.user_id])] } };
+          })),
+        }));
+        break;
+      case 'MessageUnreact':
+        setMessages((p) => ({
+          ...p,
+          [packet.channel_id]: uniq((p[packet.channel_id] || []).map((m) => {
+            if (m._id !== packet.id) return m;
+            const existing = (m.reactions?.[packet.emoji_id] || []).filter((uid) => uid !== packet.user_id);
+            const newRx = { ...(m.reactions || {}), [packet.emoji_id]: existing };
+            if (!existing.length) delete newRx[packet.emoji_id];
+            return { ...m, reactions: newRx };
+          })),
+        }));
+        break;
+      case 'MessageRemoveReaction':
+        setMessages((p) => ({
+          ...p,
+          [packet.channel_id]: uniq((p[packet.channel_id] || []).map((m) => {
+            if (m._id !== packet.id) return m;
+            const newRx = { ...(m.reactions || {}) }; delete newRx[packet.emoji_id];
+            return { ...m, reactions: newRx };
+          })),
+        }));
+        break;
+      // Channels
+      case 'ChannelCreate': setChannels((p) => ({ ...p, [packet._id]: packet })); break;
+      case 'ChannelUpdate': setChannels((p) => ({ ...p, [packet.id]: clearFields({ ...p[packet.id], ...packet.data }, packet.clear) })); break;
+      case 'ChannelDelete':
+        setChannels((p) => { const n = { ...p }; delete n[packet.id]; return n; });
+        if (selChannelRef.current === packet.id) setSelChannel('friends');
+        break;
+      case 'ChannelAck':
+        if (packet.user === auth.userId) setUnreadChannels((p) => { const n = new Set(p); n.delete(packet.id); return n; });
+        break;
+      // Typing
+      case 'ChannelStartTyping':
+        if (packet.user !== auth.userId) {
+          setTypingInChannel((p) => { const s = new Set(p[packet.id] || []); s.add(packet.user); return { ...p, [packet.id]: s }; });
+          // Auto-clear after 5 s if no stop event
+          const timerKey = `${packet.id}:${packet.user}`;
+          clearTimeout(typingTimersRef.current[timerKey]);
+          typingTimersRef.current[timerKey] = setTimeout(() => {
+            setTypingInChannel((prev) => { const s = new Set(prev[packet.id] || []); s.delete(packet.user); return { ...prev, [packet.id]: s }; });
+          }, 5000);
+        }
+        break;
+      case 'ChannelStopTyping':
+        setTypingInChannel((p) => { const s = new Set(p[packet.id] || []); s.delete(packet.user); return { ...p, [packet.id]: s }; });
+        clearTimeout(typingTimersRef.current[`${packet.id}:${packet.user}`]);
+        break;
+      // Servers
+      case 'ServerCreate': setServers((p) => ({ ...p, [packet._id || packet.id]: packet })); break;
+      case 'ServerUpdate': setServers((p) => ({ ...p, [packet.id]: clearFields({ ...p[packet.id], ...packet.data }, packet.clear) })); break;
       case 'ServerDelete':
-        setServers((prev) => { const n = { ...prev }; delete n[packet.id]; return n; });
-        if (selectedServerId === packet.id) handleServerSelect('@me');
+        setServers((p) => { const n = { ...p }; delete n[packet.id]; return n; });
+        if (selServer === packet.id) { setSelServer('@me'); setSelChannel('friends'); }
         break;
       case 'ServerMemberUpdate': {
-        const key = `${packet.id.server}:${packet.id.user}`;
-        setMembers((prev) => ({ ...prev, [key]: withoutClearedFields({ ...prev[key], _id: packet.id, ...packet.data }, packet.clear) }));
+        const k = `${packet.id.server}:${packet.id.user}`;
+        setMembers((p) => ({ ...p, [k]: clearFields({ ...p[k], _id: packet.id, ...packet.data }, packet.clear) }));
         break;
       }
-      case 'ServerMemberJoin': setMembers((prev) => ({ ...prev, [`${packet.id}:${packet.user}`]: { ...packet.member, _id: { server: packet.id, user: packet.user } } })); break;
-      case 'ServerMemberLeave': setMembers((prev) => { const n = { ...prev }; delete n[`${packet.id}:${packet.user}`]; return n; }); break;
-      case 'UserUpdate': setUsers((prev) => ({ ...prev, [packet.id]: withoutClearedFields({ ...prev[packet.id], ...packet.data }, packet.clear) })); break;
+      case 'ServerMemberJoin': setMembers((p) => ({ ...p, [`${packet.id}:${packet.user}`]: { ...packet.member, _id: { server: packet.id, user: packet.user } } })); break;
+      case 'ServerMemberLeave': setMembers((p) => { const n = { ...p }; delete n[`${packet.id}:${packet.user}`]; return n; }); break;
+      case 'UserUpdate': setUsers((p) => ({ ...p, [packet.id]: clearFields({ ...p[packet.id], ...packet.data }, packet.clear) })); break;
+      case 'UserRelationship': setUsers((p) => ({ ...p, [packet.user._id]: packet.user })); break;
       default: break;
     }
   };
-
-  // Keep ref fresh every render so the WS handler is never stale
   applyEventRef.current = applyEvent;
 
-  // ── WebSocket ─────────────────────────────────────────────────────────────
+  // ── WebSocket ──
   useEffect(() => {
     if (!auth.token || view !== 'app') return;
     let wsUrl = config.wsUrl;
-    try {
-      const parsed = new URL(wsUrl.startsWith('ws') ? wsUrl : `wss://${wsUrl}`);
-      parsed.searchParams.set('version', '1');
-      parsed.searchParams.set('format', 'json');
-      parsed.searchParams.set('token', auth.token);
-      wsUrl = parsed.toString();
-    } catch {
-      wsUrl = `${DEFAULT_WS_URL}?version=1&format=json&token=${encodeURIComponent(auth.token)}`;
-    }
+    try { const u = new URL(wsUrl.startsWith('ws') ? wsUrl : `wss://${wsUrl}`); u.searchParams.set('version', '1'); u.searchParams.set('format', 'json'); u.searchParams.set('token', auth.token); wsUrl = u.toString(); }
+    catch { wsUrl = `${DEF_WS}?version=1&format=json&token=${encodeURIComponent(auth.token)}`; }
     setStatus('connecting');
     if (wsRef.current) wsRef.current.close();
-    if (wsReconnectTimeoutRef.current) { clearTimeout(wsReconnectTimeoutRef.current); wsReconnectTimeoutRef.current = null; }
-    let isUnmounting = false;
-    const socket = new WebSocket(wsUrl);
-    wsRef.current = socket;
-    socket.onerror = () => setStatus('error');
-    socket.onclose = () => {
-      setStatus((prev) => (prev === 'error' ? prev : 'disconnected'));
-      if (isUnmounting || view !== 'app') return;
-      wsReconnectTimeoutRef.current = setTimeout(() => setWsReconnectAttempt((v) => v + 1), 2500);
+    if (wsReconTimRef.current) { clearTimeout(wsReconTimRef.current); wsReconTimRef.current = null; }
+    let dead = false;
+    const ws = new WebSocket(wsUrl); wsRef.current = ws;
+    ws.onerror = () => setStatus('error');
+    ws.onclose = () => {
+      setStatus((p) => (p === 'error' ? p : 'disconnected'));
+      if (dead || view !== 'app') return;
+      wsReconTimRef.current = setTimeout(() => setWsReconnect((v) => v + 1), 2500);
     };
-    // Use ref so we always call the latest applyEvent (stale-closure fix)
-    socket.onmessage = (event) => applyEventRef.current?.(JSON.parse(event.data));
-    const heartbeat = setInterval(() => { if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'Ping', data: Date.now() })); }, 20000);
-    return () => {
-      isUnmounting = true;
-      clearInterval(heartbeat);
-      if (wsReconnectTimeoutRef.current) { clearTimeout(wsReconnectTimeoutRef.current); wsReconnectTimeoutRef.current = null; }
-      socket.close();
-    };
+    ws.onmessage = (e) => applyEventRef.current?.(JSON.parse(e.data));
+    const hb = setInterval(() => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'Ping', data: Date.now() })); }, 20000);
+    return () => { dead = true; clearInterval(hb); if (wsReconTimRef.current) { clearTimeout(wsReconTimRef.current); wsReconTimRef.current = null; } ws.close(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auth.token, config.wsUrl, view, wsReconnectAttempt]);
+  }, [auth.token, config.wsUrl, view, wsReconnect]);
 
-  // Server subscription heartbeat
+  // ── Server subscription ──
   useEffect(() => {
-    const socket = wsRef.current;
-    if (!socket || socket.readyState !== WebSocket.OPEN || selectedServerId === '@me') return;
-    const sendSubscribe = () => {
-      if (document.visibilityState !== 'visible' || !window.document.hasFocus()) return;
-      const lastSent = subscriptionRef.current[selectedServerId] || 0;
-      if (Date.now() - lastSent < 10 * 60 * 1000) return;
-      socket.send(JSON.stringify({ type: 'Subscribe', server_id: selectedServerId }));
-      subscriptionRef.current[selectedServerId] = Date.now();
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN || selServer === '@me') return;
+    const send = () => {
+      if (document.visibilityState !== 'visible') return;
+      const last = subRef.current[selServer] || 0; if (Date.now() - last < 10 * 60 * 1000) return;
+      ws.send(JSON.stringify({ type: 'Subscribe', server_id: selServer }));
+      subRef.current[selServer] = Date.now();
     };
-    sendSubscribe();
-    window.addEventListener('focus', sendSubscribe);
-    document.addEventListener('visibilitychange', sendSubscribe);
-    const interval = setInterval(sendSubscribe, 60 * 1000);
-    return () => { clearInterval(interval); window.removeEventListener('focus', sendSubscribe); document.removeEventListener('visibilitychange', sendSubscribe); };
-  }, [selectedServerId, status]);
+    send();
+    window.addEventListener('focus', send); document.addEventListener('visibilitychange', send);
+    const iv = setInterval(send, 60000);
+    return () => { clearInterval(iv); window.removeEventListener('focus', send); document.removeEventListener('visibilitychange', send); };
+  }, [selServer, status]);
 
-  // ── Scroll handler (unified: auto-follow + load-older) ────────────────────
-  // Keep refs fresh so the stable effect can see current values
-  currentMessagesRef.current    = currentMessages;
-  fetchMessagesRef.current      = fetchMessages;
-  selectedChannelIdRef.current  = selectedChannelId;
-
+  // ── Scroll: auto-follow + load-older ──
   useEffect(() => {
-    const container = messagesContainerRef.current;
-    if (!container) return;
+    const el = scrollRef.current; if (!el) return;
     autoFollowRef.current = true;
-
-    const handleScroll = () => {
-      if (isProgrammaticScrollRef.current) return;
-
-      // Near-bottom detection
-      const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight <= 72;
-      autoFollowRef.current = nearBottom;
-      setShowGoLatest(!nearBottom);
-
-      // Load older messages when scrolled near the top
-      if (container.scrollTop < 150 && !isLoadingOlderRef.current) {
-        const msgs   = currentMessagesRef.current;
-        const oldest = msgs[0];
+    const onScroll = () => {
+      if (isPgScrollRef.current) return;
+      const nearBot = el.scrollHeight - el.scrollTop - el.clientHeight <= 72;
+      autoFollowRef.current = nearBot;
+      setShowGoLatest(!nearBot);
+      if (el.scrollTop < 150 && !isLoadOlderRef.current) {
+        const msgs = curMsgsRef.current; const oldest = msgs[0];
         if (oldest && !oldest._id.startsWith('pending-') && msgs.length >= 50) {
-          const prevScrollHeight = container.scrollHeight;
-          const prevScrollTop    = container.scrollTop;
-          isLoadingOlderRef.current = true;
-          setIsLoadingOlder(true);
-          fetchMessagesRef.current(selectedChannelIdRef.current, oldest._id)
-            .finally(() => {
-              isLoadingOlderRef.current = false;
-              setIsLoadingOlder(false);
-              // Restore scroll position so content doesn't jump
-              requestAnimationFrame(() => {
-                const delta = container.scrollHeight - prevScrollHeight;
-                container.scrollTop = prevScrollTop + delta;
-              });
-            });
+          const prevH = el.scrollHeight, prevT = el.scrollTop;
+          isLoadOlderRef.current = true; setIsLoadingOlder(true);
+          fetchMsgsRef.current(selChannelRef.current, oldest._id).finally(() => {
+            isLoadOlderRef.current = false; setIsLoadingOlder(false);
+            requestAnimationFrame(() => { el.scrollTop = prevT + (el.scrollHeight - prevH); });
+          });
         }
       }
     };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, [selChannel]);
 
-    container.addEventListener('scroll', handleScroll, { passive: true });
-    return () => container.removeEventListener('scroll', handleScroll);
-  }, [selectedChannelId]);
-
-  // Auto-scroll to bottom on new messages
   useEffect(() => {
-    if (autoFollowRef.current || (messagesContainerRef.current && messagesContainerRef.current.scrollHeight - messagesContainerRef.current.scrollTop - messagesContainerRef.current.clientHeight <= 72)) {
-      isProgrammaticScrollRef.current = true;
-      messagesBottomRef.current?.scrollIntoView({ behavior: 'auto' });
-      requestAnimationFrame(() => { isProgrammaticScrollRef.current = false; });
-      autoFollowRef.current = true;
-      setShowGoLatest(false);
-    } else {
-      setShowGoLatest(true);
-    }
-  }, [currentMessages]);
+    const el = scrollRef.current;
+    if (autoFollowRef.current || (el && el.scrollHeight - el.scrollTop - el.clientHeight <= 72)) {
+      isPgScrollRef.current = true;
+      botRef.current?.scrollIntoView({ behavior: 'auto' });
+      requestAnimationFrame(() => { isPgScrollRef.current = false; });
+      autoFollowRef.current = true; setShowGoLatest(false);
+    } else setShowGoLatest(true);
+  }, [curMsgs]);
 
-  // Fetch missing reply messages
+  // ── Fetch missing reply messages ──
   useEffect(() => {
-    if (!selectedChannelId || selectedChannelId === 'friends') return;
-    const missingReplyIds = currentMessages
-      .map((m) => getReplyIdFromMessage(m))
-      .filter((id) => id && !replyMessageCacheRef.current[id] && !currentMessageMap[id]);
-    [...new Set(missingReplyIds)].slice(0, 10).forEach((id) => { void fetchReplyMessage(selectedChannelId, id); });
-  }, [currentMessages, currentMessageMap, selectedChannelId, fetchReplyMessage]);
+    if (!selChannel || selChannel === 'friends') return;
+    const missing = [...new Set(curMsgs.map(replyId).filter((id) => id && !replyCacheRef.current[id] && !curMsgMap[id]))].slice(0, 10);
+    missing.forEach((id) => { void fetchReplyMsg(selChannel, id); });
+  }, [curMsgs, curMsgMap, selChannel, fetchReplyMsg]);
 
-  // Voice notice auto-clear
-  useEffect(() => {
-    if (!voiceNotice) return;
-    const t = setTimeout(() => setVoiceNotice(''), 3500);
-    return () => clearTimeout(t);
-  }, [voiceNotice]);
+  // ── Voice notice auto-clear ──
+  useEffect(() => { if (!voiceNotice) return; const t = setTimeout(() => setVoiceNotice(''), 3500); return () => clearTimeout(t); }, [voiceNotice]);
 
-  // Warm channel cache on connect
+  // ── Channel warm-up ──
   useEffect(() => {
     if (status !== 'ready' || !auth.token) return;
-    if (document.visibilityState !== 'visible') return;
-    const maxWarm = Math.min(8, Math.max(3, Math.floor((navigator.hardwareConcurrency || 4) / 2)));
-    Object.values(channels)
-      .filter((ch) => ch?.channel_type === 'TextChannel' || !ch?.channel_type)
-      .slice(0, maxWarm)
-      .forEach((ch, index) => {
-        if (!ch?._id || preloadedChannelRef.current[ch._id]) return;
-        setTimeout(() => { fetchMessages(ch._id); }, index * 350);
-      });
+    const max = Math.min(8, Math.max(3, Math.floor((navigator.hardwareConcurrency || 4) / 2)));
+    Object.values(channels).filter((c) => c?.channel_type === 'TextChannel' || !c?.channel_type).slice(0, max).forEach((c, i) => {
+      if (!c?._id || preloadChRef.current[c._id]) return;
+      setTimeout(() => fetchMessages(c._id), i * 350);
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, auth.token]);
 
-  // ── Navigation handlers ───────────────────────────────────────────────────
-  const handleServerSelect = (serverId) => {
-    setSelectedServerId(serverId);
-    setShowMobileSidebar(false);
-    if (serverId === '@me') { setSelectedChannelId('friends'); setReplyingTo(null); setShowEmojiPicker(false); return; }
-    const firstChannel = Object.values(channels).find((ch) => ch.server === serverId && ch.channel_type !== 'VoiceChannel') || Object.values(channels).find((ch) => ch.server === serverId);
-    setSelectedChannelId(firstChannel?._id || null);
-    if (firstChannel?._id) fetchMessages(firstChannel._id);
-    if (!preloadedMembersRef.current[serverId]) { preloadedMembersRef.current[serverId] = true; void fetchMembers(serverId); }
+  // ── Navigation handlers ──
+  const selectServer = (id) => {
+    setSelServer(id); setShowMobileSide(false);
+    if (id === '@me') { setSelChannel('friends'); setReplyingTo(null); setShowEmojiPicker(false); return; }
+    const first = Object.values(channels).find((c) => c.server === id && c.channel_type !== 'VoiceChannel') || Object.values(channels).find((c) => c.server === id);
+    setSelChannel(first?._id || null);
+    if (first?._id) fetchMessages(first._id);
+    if (!preloadMembRef.current[id]) { preloadMembRef.current[id] = true; void fetchMembers(id); }
   };
 
-  const handleChannelSelect = (channelId) => {
-    const channel = channels[channelId];
-    if (channel?.channel_type === 'VoiceChannel') { setVoiceNotice("Ermine currently doesn't support voice channels."); return; }
-    setVoiceNotice('');
-    setSelectedChannelId(channelId);
-    setReplyingTo(null);
-    setShowEmojiPicker(false);
-    setShowMobileSidebar(false);
-    fetchMessages(channelId);
+  const selectChannel = (chId) => {
+    const ch = channels[chId];
+    if (ch?.channel_type === 'VoiceChannel') { setVoiceNotice("Voice channels aren't supported yet."); return; }
+    setVoiceNotice(''); setSelChannel(chId); setReplyingTo(null); setShowEmojiPicker(false); setShowMobileSide(false);
+    fetchMessages(chId);
+    sendTypingEnd();
+    // ACK
+    const msgs = messages[chId] || [];
+    const last = msgs[msgs.length - 1];
+    if (last?._id && !last._id.startsWith('pending-')) ackChannel(chId, last._id);
   };
 
-  const openDmWithUser = async (userId) => {
+  const openDm = async (userId) => {
     if (!userId || !auth.token) return;
-    const existing = directMessageChannels.find((ch) => Array.isArray(ch?.recipients) && ch.recipients.includes(userId));
-    if (existing?._id) { setSelectedServerId('@me'); handleChannelSelect(existing._id); return; }
+    const existing = Object.values(channels).find((c) => c.channel_type === 'DirectMessage' && (c.recipients || []).includes(userId));
+    if (existing?._id) { setSelServer('@me'); selectChannel(existing._id); return; }
     try {
-      const res = await fetch(`${config.apiUrl}/users/${userId}/dm`, { method: 'GET', headers: { 'x-session-token': auth.token } });
-      if (!res.ok) return;
-      const channel = await res.json();
-      if (!channel?._id) return;
-      setChannels((prev) => ({ ...prev, [channel._id]: channel }));
-      setSelectedServerId('@me');
-      setSelectedChannelId(channel._id);
-      fetchMessages(channel._id);
+      const r = await fetch(`${config.apiUrl}/users/${userId}/dm`, { method: 'GET', headers: { 'x-session-token': auth.token } });
+      if (!r.ok) return;
+      const ch = await r.json(); if (!ch?._id) return;
+      setChannels((p) => ({ ...p, [ch._id]: ch }));
+      setSelServer('@me'); setSelChannel(ch._id); fetchMessages(ch._id);
     } catch {}
   };
 
-  const jumpToMessage = (messageId) => {
-    if (!messageId) return;
-    const target = messageRefs.current[messageId];
-    if (!target) return;
-    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    target.classList.add('ring-2', 'ring-[#5865f2]', 'bg-[#3a3f66]/40');
-    setTimeout(() => target.classList.remove('ring-2', 'ring-[#5865f2]', 'bg-[#3a3f66]/40'), 1200);
+  const jumpTo = (msgId) => {
+    if (!msgId) return;
+    const el = msgRefs.current[msgId]; if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('msg-highlight');
+    setTimeout(() => el.classList.remove('msg-highlight'), 1200);
   };
+  const regRef = (id, node) => { if (!id) return; if (node) msgRefs.current[id] = node; else delete msgRefs.current[id]; };
+  const goLatest = () => { isPgScrollRef.current = true; autoFollowRef.current = true; botRef.current?.scrollIntoView({ behavior: 'smooth' }); requestAnimationFrame(() => { isPgScrollRef.current = false; }); setShowGoLatest(false); };
+  const openLink = (url) => setLinkPromptUrl(url);
+  const confirmLink = () => { if (!linkPromptUrl) return; window.open(linkPromptUrl, '_blank', 'noopener,noreferrer'); setLinkPromptUrl(null); };
 
-  const registerMessageRef = (messageId, node) => {
-    if (!messageId) return;
-    if (node) messageRefs.current[messageId] = node;
-    else delete messageRefs.current[messageId];
-  };
-
-  const goToLatest = () => {
-    isProgrammaticScrollRef.current = true;
-    autoFollowRef.current = true;
-    messagesBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-    requestAnimationFrame(() => { isProgrammaticScrollRef.current = false; });
-    setShowGoLatest(false);
-  };
-
-  const requestOpenLink = (url) => setLinkPromptUrl(url);
-  const confirmOpenLink = () => { if (!linkPromptUrl) return; window.open(linkPromptUrl, '_blank', 'noopener,noreferrer'); setLinkPromptUrl(null); };
-
+  // ── Status ──
   const openStatusEditor = () => {
-    const currentPresence = users[auth.userId]?.status?.presence || 'Online';
-    const currentText     = users[auth.userId]?.status?.text || '';
-    setStatusDraft({ presence: currentPresence, text: currentText });
+    const u = users[auth.userId];
+    setStatusDraft({ presence: u?.status?.presence || 'Online', text: u?.status?.text || '' });
     setActiveModal('set-status');
   };
-
   const saveStatus = async () => {
-    setIsSavingStatus(true);
-    setUsers((prev) => ({ ...prev, [auth.userId]: { ...(prev[auth.userId] || {}), status: { presence: statusDraft.presence, text: statusDraft.text || undefined } } }));
-    try {
-      await fetch(`${config.apiUrl}/users/@me`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'x-session-token': auth.token }, body: JSON.stringify({ status: { presence: statusDraft.presence, text: statusDraft.text || undefined } }) });
-    } catch {} finally { setIsSavingStatus(false); setActiveModal(null); }
+    setSavingStatus(true);
+    setUsers((p) => ({ ...p, [auth.userId]: { ...p[auth.userId], status: { presence: statusDraft.presence, text: statusDraft.text || undefined } } }));
+    try { await fetch(`${config.apiUrl}/users/@me`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'x-session-token': auth.token }, body: JSON.stringify({ status: { presence: statusDraft.presence, text: statusDraft.text || undefined } }) }); }
+    catch {} finally { setSavingStatus(false); setActiveModal(null); }
   };
 
-  // ── Auth handlers ─────────────────────────────────────────────────────────
-  const handleLogin = async (event) => {
-    event.preventDefault();
-    setLoginError('');
-    if (!privacyConsent) { setLoginError('Please accept the privacy policy before signing in.'); return; }
+  // ── Login ──
+  const handleLogin = async (e) => {
+    e.preventDefault(); setLoginError('');
+    if (!privacyConsent) { setLoginError('Please accept the privacy policy.'); return; }
     setIsLoggingIn(true);
     try {
       await discoverConfig(config.apiUrl);
@@ -1460,490 +1313,487 @@ function AppShell() {
       if (loginMode === 'credentials') {
         const payload = { email, password, friendly_name: 'Ermine Web Client' };
         if (mfaCode.trim()) payload.mfa_response = { totp_code: mfaCode.trim() };
-        const res = await fetch(`${config.apiUrl}/auth/session/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-        if (!res.ok) throw new Error(res.status === 401 ? 'Invalid credentials or MFA code.' : 'Login failed.');
-        const data = await res.json();
-        token  = data.token || data.session_token;
-        userId = data.user_id;
+        const r = await fetch(`${config.apiUrl}/auth/session/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        if (!r.ok) throw new Error(r.status === 401 ? 'Invalid credentials or MFA code.' : 'Login failed.');
+        const d = await r.json(); token = d.token || d.session_token; userId = d.user_id;
       } else {
-        const meRes = await fetch(`${config.apiUrl}/users/@me`, { headers: { 'x-session-token': token } });
-        if (!meRes.ok) throw new Error('Token is invalid.');
-        const meData = await meRes.json();
-        userId = meData._id;
+        const r = await fetch(`${config.apiUrl}/users/@me`, { headers: { 'x-session-token': token } });
+        if (!r.ok) throw new Error('Invalid token.');
+        const d = await r.json(); userId = d._id;
       }
       if (!token || !userId) throw new Error('Session creation failed.');
-      setCookie(TOKEN_COOKIE_NAME, token);
-      setCookie(USER_COOKIE_NAME,  userId);
-      setCookie(API_COOKIE_NAME,   config.apiUrl);
-      setAuth({ token, userId });
-      setView('app');
-    } catch (err) {
-      setLoginError(err.message || 'Unknown login error');
-    } finally {
-      setIsLoggingIn(false);
-    }
+      setCookie(TK, token); setCookie(UK, userId); setCookie(AK, config.apiUrl);
+      setAuth({ token, userId }); setView('app');
+    } catch (err) { setLoginError(err.message || 'Unknown error'); }
+    finally { setIsLoggingIn(false); }
   };
 
   const logout = () => {
-    clearCookie(TOKEN_COOKIE_NAME); clearCookie(USER_COOKIE_NAME); clearCookie(API_COOKIE_NAME);
-    localStorage.removeItem('stoat_token'); localStorage.removeItem('stoat_user_id'); localStorage.removeItem('stoat_api_url');
+    [TK,UK,AK].forEach(clearCookie);
+    ['stoat_token','stoat_user_id','stoat_api_url'].forEach((k) => localStorage.removeItem(k));
     setAuth({ token: null, userId: null });
     setMessages({}); setServers({}); setChannels({}); setUsers({}); setMembers({});
-    preloadedChannelRef.current   = {};
-    preloadedMembersRef.current   = {};
-    pendingUserFetchRef.current   = new Set();
-    membersLoadIdRef.current      = 0;
-    canFetchMissingUsersRef.current = true;
-    loggedMissingUserFetchErrorRef.current = false;
-    setIsMembersLoading(false);
-    setWsReconnectAttempt(0);
-    if (wsReconnectTimeoutRef.current) { clearTimeout(wsReconnectTimeoutRef.current); wsReconnectTimeoutRef.current = null; }
+    preloadChRef.current = {}; preloadMembRef.current = {}; pendingUsersRef.current = new Set();
+    membLoadIdRef.current = 0; canFetchUsersRef.current = true; loggedFetchErrRef.current = false;
+    setIsMembLoading(false); setWsReconnect(0); setUnreadChannels(new Set()); setTypingInChannel({});
+    if (wsReconTimRef.current) { clearTimeout(wsReconTimRef.current); wsReconTimRef.current = null; }
     setView('login'); setStatus('disconnected');
   };
 
-  // ── Messaging handlers ────────────────────────────────────────────────────
+  // ── Messaging ──
   const sendMessage = async () => {
-    const content  = inputText.trim();
-    const hasFiles = pendingFiles.length > 0;
-    if ((!content && !hasFiles) || !selectedChannelId || selectedChannelId === 'friends') return;
-    setInputText('');
-    setIsUploadingFiles(hasFiles);
-    const nonce = crypto.randomUUID();
-    const pendingId = `pending-${nonce}`;
-    const meUser = users[auth.userId] || { _id: auth.userId, username: 'You' };
-    const optimisticMessage = {
-      _id: pendingId, channel: selectedChannelId, author: auth.userId, user: meUser, content,
-      createdAt: new Date().toISOString(), reactions: {},
-      replies: replyingTo ? [{ id: replyingTo._id, mention: false }] : undefined,
-      attachments: pendingFiles.map((file, i) => ({ _id: `pending-attachment-${i}-${file.name}`, filename: file.name })),
-    };
-    setMessages((prev) => {
-      const list = prev[selectedChannelId] || [];
-      return { ...prev, [selectedChannelId]: uniqueMessages([...list, optimisticMessage]).slice(-200) };
-    });
+    const content = inputText.trim(); const hasFiles = pendingFiles.length > 0;
+    if ((!content && !hasFiles) || !selChannel || selChannel === 'friends') return;
+    setInputText(''); setIsUploading(hasFiles); sendTypingEnd();
+    const nonce = crypto.randomUUID(); const pid = `pending-${nonce}`;
+    const me = users[auth.userId] || { _id: auth.userId, username: 'You' };
+    const opt = { _id: pid, channel: selChannel, author: auth.userId, user: me, content, createdAt: new Date().toISOString(), reactions: {}, replies: replyingTo ? [{ id: replyingTo._id, mention: false }] : undefined, attachments: pendingFiles.map((f, i) => ({ _id: `pa-${i}-${f.name}`, filename: f.name })) };
+    setMessages((p) => { const l = p[selChannel] || []; return { ...p, [selChannel]: uniq([...l, opt]).slice(-200) }; });
     try {
-      const attachmentIds = hasFiles ? await uploadFiles(pendingFiles) : [];
-      const payload = { content, nonce, replies: replyingTo ? [{ id: replyingTo._id, mention: false }] : undefined, attachments: attachmentIds.length ? attachmentIds : undefined };
-      const res = await fetch(`${config.apiUrl}/channels/${selectedChannelId}/messages`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-session-token': auth.token }, body: JSON.stringify(payload) });
-      if (!res.ok) throw new Error('Failed to send message');
-      const posted = await res.json();
+      const aids = hasFiles ? await uploadFiles(pendingFiles) : [];
+      const payload = { content, nonce, replies: replyingTo ? [{ id: replyingTo._id, mention: false }] : undefined, attachments: aids.length ? aids : undefined };
+      const r = await fetch(`${config.apiUrl}/channels/${selChannel}/messages`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-session-token': auth.token }, body: JSON.stringify(payload) });
+      if (!r.ok) throw new Error('Send failed');
+      const posted = await r.json();
       if (posted?._id) {
-        upsertUsersFromMessages([posted]);
-        setMessages((prev) => {
-          const list = (prev[selectedChannelId] || []).filter((m) => m._id !== pendingId);
-          const deduped = list.some((m) => m._id === posted._id) ? list.map((m) => m._id === posted._id ? posted : m) : [...list, posted];
-          return { ...prev, [selectedChannelId]: uniqueMessages(deduped.sort((a, b) => a._id > b._id ? 1 : -1)) };
+        upsertUsersFromMsgs([posted]);
+        setMessages((p) => {
+          const l = (p[selChannel] || []).filter((m) => m._id !== pid);
+          const dd = l.some((m) => m._id === posted._id) ? l.map((m) => m._id === posted._id ? posted : m) : [...l, posted];
+          return { ...p, [selChannel]: uniq(dd.sort((a, b) => a._id > b._id ? 1 : -1)) };
         });
       }
       setPendingFiles([]); setReplyingTo(null); setShowEmojiPicker(false);
     } catch {
-      setMessages((prev) => ({ ...prev, [selectedChannelId]: (prev[selectedChannelId] || []).filter((m) => m._id !== pendingId) }));
+      setMessages((p) => ({ ...p, [selChannel]: (p[selChannel] || []).filter((m) => m._id !== pid) }));
       setInputText(content);
-    } finally {
-      setIsUploadingFiles(false);
-    }
+    } finally { setIsUploading(false); }
   };
 
-  const editMessage = async (messageId, newContent) => {
-    try {
-      const res = await fetch(`${config.apiUrl}/channels/${selectedChannelId}/messages/${messageId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'x-session-token': auth.token }, body: JSON.stringify({ content: newContent }) });
-      if (!res.ok) throw new Error('Failed to edit');
-    } catch (err) { console.error(err); }
+  const editMessage = async (msgId, content) => {
+    try { await fetch(`${config.apiUrl}/channels/${selChannel}/messages/${msgId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'x-session-token': auth.token }, body: JSON.stringify({ content }) }); }
+    catch (err) { console.error(err); }
   };
 
-  const deleteMessage = async (messageId) => {
-    if (!confirm('Are you sure you want to delete this message?')) return;
-    try {
-      await fetch(`${config.apiUrl}/channels/${selectedChannelId}/messages/${messageId}`, { method: 'DELETE', headers: { 'x-session-token': auth.token } });
-    } catch (err) { console.error(err); }
+  const deleteMessage = async (msgId) => {
+    if (!confirm('Delete this message?')) return;
+    try { await fetch(`${config.apiUrl}/channels/${selChannel}/messages/${msgId}`, { method: 'DELETE', headers: { 'x-session-token': auth.token } }); }
+    catch (err) { console.error(err); }
   };
 
-  const toggleReaction = async (message, emoji, reacted) => {
-    if (!message?._id || !selectedChannelId || selectedChannelId === 'friends') return;
-    const encodedEmoji = encodeURIComponent(emoji);
-    setMessages((prev) => {
-      const nextList = (prev[selectedChannelId] || []).map((entry) => {
-        if (entry._id !== message._id) return entry;
-        const existing    = entry.reactions?.[emoji] || [];
-        const nextUserIds = reacted ? existing.filter((id) => id !== auth.userId) : [...new Set([...existing, auth.userId])];
-        return { ...entry, reactions: { ...(entry.reactions || {}), [emoji]: nextUserIds } };
-      });
-      return { ...prev, [selectedChannelId]: nextList };
-    });
-    try {
-      await fetch(`${config.apiUrl}/channels/${selectedChannelId}/messages/${message._id}/reactions/${encodedEmoji}`, { method: reacted ? 'DELETE' : 'PUT', headers: { 'x-session-token': auth.token } });
-    } catch {}
+  const toggleReaction = async (msg, emoji, reacted) => {
+    if (!msg?._id || !selChannel || selChannel === 'friends') return;
+    const enc = encodeURIComponent(emoji);
+    setMessages((p) => ({
+      ...p,
+      [selChannel]: (p[selChannel] || []).map((m) => {
+        if (m._id !== msg._id) return m;
+        const ex = m.reactions?.[emoji] || [];
+        const nxt = reacted ? ex.filter((id) => id !== auth.userId) : [...new Set([...ex, auth.userId])];
+        return { ...m, reactions: { ...(m.reactions || {}), [emoji]: nxt } };
+      }),
+    }));
+    try { await fetch(`${config.apiUrl}/channels/${selChannel}/messages/${msg._id}/reactions/${enc}`, { method: reacted ? 'DELETE' : 'PUT', headers: { 'x-session-token': auth.token } }); }
+    catch {}
   };
-
-  const addEmojiToComposer       = (emoji)   => { setInputText((p) => `${p}${emoji}`); setShowEmojiPicker(false); };
-  const addCustomEmojiToComposer = (emojiId) => { setInputText((p) => `${p}:${emojiId}:`); setShowEmojiPicker(false); };
-
-  const handleFilePick = (e) => { const files = Array.from(e.target.files || []); if (!files.length) return; setPendingFiles((p) => [...p, ...files]); e.target.value = ''; };
-  const handleComposerDrop      = (e) => { e.preventDefault(); const files = Array.from(e.dataTransfer?.files || []); if (files.length) setPendingFiles((p) => [...p, ...files]); };
-  const handleComposerDragOver  = (e) => e.preventDefault();
-  const removePendingFile       = (index) => setPendingFiles((p) => p.filter((_, i) => i !== index));
 
   const uploadFiles = async (files = []) => {
     const ids = [];
-    for (const file of files) {
-      const body = new FormData(); body.append('file', file);
-      const res = await fetch(`${config.cdnUrl}/attachments`, { method: 'POST', body, headers: { 'X-Session-Token': auth.token } });
-      if (!res.ok) throw new Error('Failed to upload file');
-      const data = await res.json();
-      if (data?.id) ids.push(data.id);
+    for (const f of files) {
+      const body = new FormData(); body.append('file', f);
+      const r = await fetch(`${config.cdnUrl}/attachments`, { method: 'POST', body, headers: { 'X-Session-Token': auth.token } });
+      if (!r.ok) throw new Error('Upload failed');
+      const d = await r.json(); if (d?.id) ids.push(d.id);
     }
     return ids;
   };
 
+  // ── Invite ──
+  const createInvite = async () => {
+    setInviteCreated(''); setInviteError('');
+    try {
+      const r = await fetch(`${config.apiUrl}/channels/${selChannel}/invites`, { method: 'POST', headers: { 'x-session-token': auth.token } });
+      if (!r.ok) throw new Error('Failed to create invite');
+      const d = await r.json(); setInviteCreated(d._id || d.code || d.id || '');
+    } catch (err) { setInviteError(err.message); }
+  };
+
+  const joinByInvite = async () => {
+    if (!inviteCode.trim()) return; setJoinLoading(true); setInviteError('');
+    try {
+      const r = await fetch(`${config.apiUrl}/invites/${inviteCode.trim()}`, { method: 'POST', headers: { 'x-session-token': auth.token } });
+      if (!r.ok) throw new Error('Invalid or expired invite code');
+      setActiveModal(null); setInviteCode('');
+    } catch (err) { setInviteError(err.message); }
+    finally { setJoinLoading(false); }
+  };
+
+  // ── Server CRUD ──
   const createServer = async () => {
     if (!createServerName.trim()) return;
-    try {
-      const res = await fetch(`${config.apiUrl}/servers/create`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-session-token': auth.token }, body: JSON.stringify({ name: createServerName.trim() }) });
-      if (res.ok) { setCreateServerName(''); setActiveModal(null); }
-    } catch {}
+    try { const r = await fetch(`${config.apiUrl}/servers/create`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-session-token': auth.token }, body: JSON.stringify({ name: createServerName.trim() }) }); if (r.ok) { setCreateServerName(''); setActiveModal(null); } }
+    catch {}
   };
-
   const updateServer = async () => {
-    if (!selectedServerId || selectedServerId === '@me' || !editServerName.trim()) return;
+    if (!selServer || selServer === '@me' || !editServerName.trim()) return;
     setIsUpdatingServer(true);
-    try {
-      const res = await fetch(`${config.apiUrl}/servers/${selectedServerId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'x-session-token': auth.token }, body: JSON.stringify({ name: editServerName.trim() }) });
-      if (res.ok) setActiveModal(null);
-    } catch {} finally { setIsUpdatingServer(false); }
+    try { const r = await fetch(`${config.apiUrl}/servers/${selServer}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'x-session-token': auth.token }, body: JSON.stringify({ name: editServerName.trim() }) }); if (r.ok) setActiveModal(null); }
+    catch {} finally { setIsUpdatingServer(false); }
   };
-
   const deleteServer = async () => {
-    if (!selectedServerId || selectedServerId === '@me') return;
-    if (!confirm(`Are you absolutely sure you want to delete "${selectedServer?.name}"? This cannot be undone.`)) return;
+    if (!selServer || selServer === '@me') return;
+    if (!confirm(`Delete "${selServerObj?.name}"? This cannot be undone.`)) return;
     setIsUpdatingServer(true);
-    try { await fetch(`${config.apiUrl}/servers/${selectedServerId}`, { method: 'DELETE', headers: { 'x-session-token': auth.token } }); setActiveModal(null); }
+    try { await fetch(`${config.apiUrl}/servers/${selServer}`, { method: 'DELETE', headers: { 'x-session-token': auth.token } }); setActiveModal(null); }
     catch {} finally { setIsUpdatingServer(false); }
   };
 
-  const openServerSettings = () => { if (selectedServer) { setEditServerName(selectedServer.name); setActiveModal('server-settings'); } };
+  // ── Friend requests ──
+  const sendFriendRequest = async (username) => {
+    if (!username?.trim()) return;
+    try { const r = await fetch(`${config.apiUrl}/users/${username}/friend`, { method: 'PUT', headers: { 'x-session-token': auth.token } }); if (!r.ok) throw new Error('Failed'); const d = await r.json(); if (d?._id) upsertUsers([d]); }
+    catch (err) { alert(err.message); }
+  };
+  const removeFriend = async (userId) => {
+    try { const r = await fetch(`${config.apiUrl}/users/${userId}/friend`, { method: 'DELETE', headers: { 'x-session-token': auth.token } }); if (!r.ok) throw new Error('Failed'); const d = await r.json(); if (d?._id) upsertUsers([d]); }
+    catch {}
+  };
 
-  // ── Loading screen ────────────────────────────────────────────────────────
-  if (view === 'loading')
-    return <div className="grid h-screen place-items-center bg-[#0F1115] text-[#8AB4F8]"><Hash className="animate-spin" size={42} /></div>;
+  // ── Composer helpers ──
+  const addEmoji = (e) => { setInputText((p) => `${p}${e}`); setShowEmojiPicker(false); };
+  const addCE    = (id) => { setInputText((p) => `${p}:${id}:`); setShowEmojiPicker(false); };
+  const onFilePick = (e) => { const f = Array.from(e.target.files || []); if (f.length) setPendingFiles((p) => [...p, ...f]); e.target.value = ''; };
 
-  // ── Login screen ──────────────────────────────────────────────────────────
-  if (view === 'login') {
-    return (
-      <div className="min-h-screen bg-[#0F1115] px-4 py-10 text-[#E6EDF3]">
-        <div className="relative mx-auto max-w-md rounded-2xl border border-[#242A35] bg-[#171A21] p-8 shadow-2xl">
-          <div className="absolute right-4 top-4">
-            <span className="rounded-full border border-[#242A35] bg-[#141821] px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[#B6D8F6]" title="Under active development">
-              Experimental Build
-            </span>
+  // ── Channel type icon ──
+  const chIcon = (ch) => {
+    if (!ch) return <Hash size={16} />;
+    switch (ch.channel_type) {
+      case 'DirectMessage': return <MessageSquare size={16} />;
+      case 'VoiceChannel':  return <Users size={16} />;
+      case 'SavedMessages': return <BookOpen size={16} />;
+      case 'Group':         return <Users size={16} />;
+      default:              return <Hash size={16} />;
+    }
+  };
+
+  // ── DM label helper ──
+  const dmLabel = (ch) => {
+    if (ch.channel_type === 'SavedMessages') return 'Saved Notes';
+    if (ch.channel_type === 'Group') return ch.name || 'Group';
+    const rid = (ch.recipients || []).find((id) => id !== auth.userId);
+    return users[rid]?.username || ch.name || 'DM';
+  };
+
+  // ── Loading / Login screens ──
+  if (view === 'loading') return <div className="grid h-screen place-items-center bg-[#0F1115] text-[#8AB4F8]"><Loader className="animate-spin" size={36} /></div>;
+
+  if (view === 'login') return (
+    <div className="min-h-screen bg-[#0F1115] px-4 py-10 text-[#E6EDF3]">
+      <div className="relative mx-auto max-w-md rounded-2xl border border-[#242A35] bg-[#171A21] p-8 shadow-2xl">
+        <span className="absolute right-4 top-4 rounded-full border border-[#242A35] bg-[#141821] px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[#B6D8F6]">Experimental</span>
+        <div className="mb-6 text-center">
+          {/* Logo: uses public/assets — served by Vite correctly */}
+          <div className="mx-auto mb-3 h-16 w-16 overflow-hidden rounded-2xl border border-[#242A35] bg-[#141821] flex items-center justify-center">
+            <img alt="Ermine" className="h-full w-full object-cover" src="/assets/android-chrome-192x192.png"
+              onError={(e) => { e.currentTarget.style.display='none'; e.currentTarget.nextSibling.style.display='flex'; }}
+            />
+            {/* Fallback inline SVG logo */}
+            <svg style={{ display: 'none' }} viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-10 h-10">
+              <path d="M12 10h24v6H18v6h12v6H18v6h18v6H12V10z" fill="#E6EDF3"/>
+            </svg>
           </div>
-          <div className="mb-6 text-center">
-            <div className="mx-auto mb-3 h-16 w-16 overflow-hidden rounded-2xl border border-[#242A35] bg-[#141821]">
-              <img alt="Ermine logo" className="h-full w-full object-cover" src="/assets/android-chrome-192x192.png" />
+          <h1 className="text-2xl font-bold text-white">Ermine</h1>
+          <p className="text-sm text-[#A6B0C3]">A refined client for stoat.chat.</p>
+        </div>
+        <div className="mb-5 grid grid-cols-2 gap-2 rounded-lg bg-[#141821] p-1 text-xs font-semibold uppercase tracking-wide">
+          <button className={`rounded py-2 transition-colors ${loginMode === 'credentials' ? 'bg-[#8AB4F8] text-[#0F1115]' : 'text-gray-400 hover:text-white'}`} onClick={() => setLoginMode('credentials')} type="button">Credentials</button>
+          <button className={`rounded py-2 transition-colors ${loginMode === 'token' ? 'bg-[#8AB4F8] text-[#0F1115]' : 'text-gray-400 hover:text-white'}`} onClick={() => setLoginMode('token')} type="button">Token</button>
+        </div>
+        <form className="space-y-4" onSubmit={handleLogin}>
+          {loginMode === 'credentials' ? (
+            <>
+              <input className={inputBase} onChange={(e) => setEmail(e.target.value)} placeholder="Email" type="email" value={email} />
+              <input className={inputBase} onChange={(e) => setPassword(e.target.value)} placeholder="Password" type="password" value={password} />
+              <label className="block text-xs font-semibold uppercase tracking-wide text-gray-400">
+                <span className="mb-1 flex items-center gap-1"><ShieldCheck size={12} /> MFA (optional)</span>
+                <input className={inputBase} onChange={(e) => setMfaCode(e.target.value)} placeholder="2FA code" type="text" value={mfaCode} />
+              </label>
+            </>
+          ) : (
+            <textarea className={`${inputBase} h-24 resize-none`} onChange={(e) => setManualToken(e.target.value)} placeholder="Paste session token" value={manualToken} />
+          )}
+          <label className="flex items-start gap-2 rounded-md border border-[#242A35] bg-[#141821] p-2 text-xs text-[#A6B0C3] cursor-pointer">
+            <input checked={privacyConsent} className="mt-0.5" onChange={(e) => setPrivacyConsent(e.target.checked)} type="checkbox" />
+            <span>I agree to the <a className="text-[#B6D8F6] underline" href="/privacy-policy.html" rel="noreferrer" target="_blank">privacy policy</a>. Ermine does not store content outside configured stoat.chat endpoints.</span>
+          </label>
+          {loginError && <div className="flex items-start gap-2 rounded-md border border-red-800 bg-red-900/30 p-2 text-sm text-red-200"><AlertCircle className="mt-0.5 shrink-0" size={14} />{loginError}</div>}
+          <button className="w-full rounded-md bg-[#8AB4F8] py-2.5 text-sm font-semibold text-[#0F1115] hover:bg-[#6FA6E8] disabled:opacity-60 flex items-center justify-center gap-2 transition-opacity" disabled={isLoggingIn} type="submit">
+            {isLoggingIn ? <><Loader className="animate-spin" size={14} /> Signing in…</> : 'Sign in to Ermine'}
+          </button>
+        </form>
+        <div className="mt-5 border-t border-[#202225] pt-4">
+          <button className="flex items-center gap-1 text-xs text-[#A6B0C3] hover:text-white transition-colors" onClick={() => setShowAdvanced((p) => !p)} type="button"><Settings size={12} /> Advanced configuration</button>
+          {showAdvanced && (
+            <div className="mt-2 space-y-2 rounded-md bg-[#141821] p-2">
+              <input className={inputBase} onChange={(e) => setConfig((p) => ({ ...p, apiUrl: e.target.value }))} placeholder="API URL" value={config.apiUrl} />
+              <input className={inputBase} onChange={(e) => setConfig((p) => ({ ...p, wsUrl:  e.target.value }))} placeholder="WS URL"  value={config.wsUrl} />
+              <input className={inputBase} onChange={(e) => setConfig((p) => ({ ...p, cdnUrl: e.target.value }))} placeholder="CDN URL" value={config.cdnUrl} />
             </div>
-            <h1 className="text-2xl font-bold text-white">Ermine</h1>
-            <p className="text-sm text-[#A6B0C3]">A refined client for stoat.chat.</p>
-            <p className="mt-1 text-xs text-[#8892A6]">Clean layout. Familiar flow. Experimental build.</p>
-          </div>
-          <div className="mb-5 grid grid-cols-2 gap-2 rounded-lg bg-[#141821] p-1 text-xs font-semibold uppercase tracking-wide">
-            <button className={`rounded py-2 transition-colors ${loginMode === 'credentials' ? 'bg-[#8AB4F8] text-[#0F1115]' : 'text-gray-400 hover:text-white'}`} onClick={() => setLoginMode('credentials')} type="button">Credentials</button>
-            <button className={`rounded py-2 transition-colors ${loginMode === 'token'       ? 'bg-[#8AB4F8] text-[#0F1115]' : 'text-gray-400 hover:text-white'}`} onClick={() => setLoginMode('token')}       type="button">Token</button>
-          </div>
-          <form className="space-y-4" onSubmit={handleLogin}>
-            {loginMode === 'credentials' ? (
-              <>
-                <input className={inputBase} onChange={(e) => setEmail(e.target.value)} placeholder="Email" type="email" value={email} />
-                <input className={inputBase} onChange={(e) => setPassword(e.target.value)} placeholder="Password" type="password" value={password} />
-                <label className="block text-xs font-semibold uppercase tracking-wide text-gray-400">
-                  <span className="mb-1 flex items-center gap-1"><ShieldCheck size={12} /> MFA</span>
-                  <input className={inputBase} onChange={(e) => setMfaCode(e.target.value)} placeholder="Optional 2FA code" type="text" value={mfaCode} />
-                </label>
-              </>
-            ) : (
-              <textarea className={`${inputBase} h-24 resize-none`} onChange={(e) => setManualToken(e.target.value)} placeholder="Paste session token" value={manualToken} />
-            )}
-            <label className="flex items-start gap-2 rounded-md border border-[#242A35] bg-[#141821] p-2 text-xs text-[#A6B0C3] cursor-pointer">
-              <input checked={privacyConsent} className="mt-0.5" onChange={(e) => setPrivacyConsent(e.target.checked)} type="checkbox" />
-              <span>I agree to the <a className="text-[#B6D8F6] underline hover:text-[#E6F0FF]" href="/privacy-policy.html" rel="noreferrer" target="_blank">privacy policy</a>. Ermine does not store user content outside configured stoat.chat endpoints.</span>
-            </label>
-            {loginError ? (
-              <div className="flex items-start gap-2 rounded-md border border-red-800 bg-red-900/30 p-2 text-sm text-red-200">
-                <AlertCircle className="mt-0.5 shrink-0" size={15} /><span>{loginError}</span>
-              </div>
-            ) : null}
-            <button
-              className="w-full rounded-md bg-[#8AB4F8] py-2.5 text-sm font-semibold text-[#0F1115] hover:bg-[#6FA6E8] disabled:opacity-60 transition-opacity flex items-center justify-center gap-2"
-              disabled={isLoggingIn}
-              type="submit"
-            >
-              {isLoggingIn ? <><Loader className="animate-spin" size={14} /> Signing in…</> : 'Log in to Ermine'}
-            </button>
-          </form>
-          <div className="mt-5 border-t border-[#202225] pt-4">
-            <button className="flex items-center gap-1 text-xs text-[#A6B0C3] hover:text-[#E6EDF3] transition-colors" onClick={() => setShowAdvanced((p) => !p)} type="button">
-              <Settings size={12} /> Advanced connection configuration
-            </button>
-            {showAdvanced ? (
-              <div className="mt-2 space-y-2 rounded-md bg-[#141821] p-2">
-                <input className={inputBase} onChange={(e) => setConfig((p) => ({ ...p, apiUrl: e.target.value }))} placeholder="API URL" value={config.apiUrl} />
-                <input className={inputBase} onChange={(e) => setConfig((p) => ({ ...p, wsUrl:  e.target.value }))} placeholder="WS URL"  value={config.wsUrl} />
-                <input className={inputBase} onChange={(e) => setConfig((p) => ({ ...p, cdnUrl: e.target.value }))} placeholder="CDN URL" value={config.cdnUrl} />
-              </div>
-            ) : null}
-          </div>
+          )}
         </div>
       </div>
-    );
-  }
+    </div>
+  );
 
-  // ── App shell ─────────────────────────────────────────────────────────────
+  // ── App ──────────────────────────────────────────────────────────────────────
   return (
     <div className="flex h-screen overflow-hidden bg-[#0F1115] text-[#E6EDF3]">
 
-      {/* ── Modals ── */}
-      {activeModal === 'create-server' ? (
+      {/* ════ MODALS ════ */}
+
+      {activeModal === 'create-server' && (
         <Modal onClose={() => setActiveModal(null)} title="Create a Space">
           <input className={inputBase} onChange={(e) => setCreateServerName(e.target.value)} placeholder="Space name" value={createServerName} autoFocus />
           <button className="w-full rounded-md bg-[#3ba55d] py-2 text-sm font-semibold text-white hover:bg-[#328a4f] transition-colors" onClick={createServer}>Create Space</button>
         </Modal>
-      ) : null}
+      )}
 
-      {activeModal === 'server-settings' && selectedServer ? (
-        <Modal onClose={() => setActiveModal(null)} title="Space Settings">
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Space Name</label>
-            <div className="flex gap-2">
-              <input className={inputBase} onChange={(e) => setEditServerName(e.target.value)} value={editServerName} placeholder="Enter space name" />
-              <button onClick={updateServer} disabled={isUpdatingServer || !editServerName.trim()} className="rounded bg-[#5865f2] px-3 text-white hover:bg-[#4956d8] disabled:opacity-50 transition-colors"><Save size={18} /></button>
+      {activeModal === 'join-server' && (
+        <Modal onClose={() => { setActiveModal(null); setInviteCode(''); setInviteError(''); }} title="Join a Space">
+          <p className="text-xs text-gray-400">Enter an invite code to join a space.</p>
+          <input className={inputBase} placeholder="Invite code (e.g. abc123)" value={inviteCode} onChange={(e) => setInviteCode(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && joinByInvite()} autoFocus />
+          {inviteError && <p className="text-xs text-red-400">{inviteError}</p>}
+          <button className="w-full rounded-md bg-[#5865f2] py-2 text-sm font-semibold text-white hover:bg-[#4956d8] disabled:opacity-60 transition-colors flex items-center justify-center gap-2" disabled={joinLoading || !inviteCode.trim()} onClick={joinByInvite}>
+            {joinLoading ? <><Loader className="animate-spin" size={14} /> Joining…</> : 'Join Space'}
+          </button>
+        </Modal>
+      )}
+
+      {activeModal === 'create-invite' && (
+        <Modal onClose={() => { setActiveModal(null); setInviteCreated(''); setInviteError(''); }} title="Invite to Space">
+          <p className="text-xs text-gray-400">Create an invite link for <strong className="text-white">{selServerObj?.name}</strong> via <strong className="text-white">#{curChName}</strong>.</p>
+          {!inviteCreated ? (
+            <button className="w-full rounded-md bg-[#5865f2] py-2 text-sm font-semibold text-white hover:bg-[#4956d8] transition-colors flex items-center justify-center gap-2" onClick={createInvite}>
+              <Link size={14} /> Create Invite
+            </button>
+          ) : (
+            <div>
+              <p className="text-xs text-gray-400 mb-1">Share this code:</p>
+              <div className="flex gap-2">
+                <code className="flex-1 rounded bg-[#141821] px-3 py-2 text-sm text-[#8AB4F8] select-all">{inviteCreated}</code>
+                <button className="rounded bg-[#5865f2] px-3 py-2 text-white hover:bg-[#4956d8] transition-colors" onClick={() => { navigator.clipboard.writeText(inviteCreated); setCopiedInvite(true); setTimeout(() => setCopiedInvite(false), 2000); }}>
+                  {copiedInvite ? <Check size={16} /> : <Copy size={16} />}
+                </button>
+              </div>
             </div>
+          )}
+          {inviteError && <p className="text-xs text-red-400">{inviteError}</p>}
+        </Modal>
+      )}
+
+      {activeModal === 'pinned' && (
+        <Modal onClose={() => setActiveModal(null)} title={`Pinned — #${curChName}`} wide>
+          {pinnedMessages.length === 0
+            ? <p className="text-sm text-gray-400 text-center py-4">No pinned messages in this channel.</p>
+            : pinnedMessages.map((m) => (
+                <div key={m._id} className="rounded-lg bg-[#1e2024] p-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Avatar user={users[typeof m.author === 'string' ? m.author : m.author?._id]} cdn={config.cdnUrl} size="sm" />
+                    <span className="text-sm font-semibold text-white">{users[typeof m.author === 'string' ? m.author : m.author?._id]?.username || 'Unknown'}</span>
+                    <span className="text-xs text-gray-400">{smartTime(m.createdAt || m._id)}</span>
+                    <button className="ml-auto text-xs text-gray-400 hover:text-white" onClick={() => { setActiveModal(null); jumpTo(m._id); }}>Jump</button>
+                  </div>
+                  <p className="text-sm text-gray-200 whitespace-pre-wrap break-words">{m.content}</p>
+                </div>
+              ))
+          }
+        </Modal>
+      )}
+
+      {activeModal === 'server-settings' && selServerObj && (
+        <Modal onClose={() => setActiveModal(null)} title="Space Settings">
+          <label className="block text-xs font-semibold uppercase tracking-wide text-gray-400 mb-1">Space Name</label>
+          <div className="flex gap-2">
+            <input className={inputBase} onChange={(e) => setEditServerName(e.target.value)} value={editServerName} placeholder="Space name" />
+            <button onClick={updateServer} disabled={isUpdatingServer || !editServerName.trim()} className="rounded bg-[#5865f2] px-3 text-white hover:bg-[#4956d8] disabled:opacity-50 transition-colors"><Save size={18} /></button>
           </div>
           <div className="border-t border-[#202225] pt-3">
             <h4 className="text-xs font-bold text-red-400 uppercase tracking-wide mb-2">Danger Zone</h4>
-            <div className="flex items-center justify-between rounded border border-red-900/50 p-3 bg-red-900/10">
-              <div><div className="font-semibold text-white text-sm">Delete Space</div><div className="text-xs text-gray-400">Permanently remove this space and all its contents.</div></div>
-              <button onClick={deleteServer} disabled={isUpdatingServer} className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-sm font-semibold transition-colors">Delete</button>
+            <div className="flex items-center justify-between rounded border border-red-900/50 bg-red-900/10 p-3">
+              <div><div className="text-sm font-semibold text-white">Delete Space</div><div className="text-xs text-gray-400">Permanently removes this space.</div></div>
+              <button onClick={deleteServer} disabled={isUpdatingServer} className="rounded bg-red-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-700 transition-colors">Delete</button>
             </div>
           </div>
         </Modal>
-      ) : null}
+      )}
 
-      {activeModal === 'discovery' ? (
-        <Modal onClose={() => setActiveModal(null)} title="Space Discovery">
-          <div className="p-4 text-center">
-            <Search size={48} className="mx-auto text-green-500 mb-4" />
-            <h3 className="text-lg font-bold text-white mb-2">Explore Communities</h3>
-            <p className="text-sm text-gray-400">Server discovery is coming soon to Ermine!</p>
+      {activeModal === 'set-status' && (
+        <Modal onClose={() => setActiveModal(null)} title="Set Status">
+          <div className="grid gap-2">
+            {STATUS_OPTIONS.map((o) => (
+              <button key={o.value} className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors ${statusDraft.presence === o.value ? 'border-[#5865f2] bg-[#2c3163]/40' : 'border-[#2f3237] bg-[#1f2024] hover:border-[#3f4451]'}`} onClick={() => setStatusDraft((p) => ({ ...p, presence: o.value }))} type="button">
+                <span className={`p-1.5 ${o.iconClass}`}><o.icon size={14} /></span>
+                <span className="text-sm">{o.label}</span>
+              </button>
+            ))}
           </div>
-        </Modal>
-      ) : null}
-
-      {activeModal === 'set-status' ? (
-        <Modal onClose={() => setActiveModal(null)} title="Set your status">
-          <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Presence</p>
-            <div className="grid grid-cols-1 gap-2">
-              {STATUS_OPTIONS.map((option) => (
-                <button
-                  className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors ${statusDraft.presence === option.value ? 'border-[#5865f2] bg-[#2c3163]/45' : 'border-[#2f3237] bg-[#1f2024] hover:border-[#3f4451] hover:bg-[#282a31]'}`}
-                  key={option.value}
-                  onClick={() => setStatusDraft((p) => ({ ...p, presence: option.value }))}
-                  type="button"
-                >
-                  <span className={`p-1.5 ${option.iconClass}`}><option.icon size={15} /></span>
-                  <span className="text-sm text-gray-100">{option.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-          <label className="block text-xs font-semibold uppercase tracking-wide text-gray-400">
-            Custom status
+          <label className="block text-xs font-semibold uppercase tracking-wide text-gray-400">Custom status
             <input className={`${inputBase} mt-1`} maxLength={128} onChange={(e) => setStatusDraft((p) => ({ ...p, text: e.target.value }))} placeholder="What's up?" value={statusDraft.text} />
           </label>
-          <button className="w-full rounded-md bg-[#5865f2] py-2 text-sm font-semibold text-white hover:bg-[#4956d8] transition-colors" disabled={isSavingStatus} onClick={saveStatus} type="button">
-            {isSavingStatus ? 'Saving…' : 'Save status'}
-          </button>
+          <button className="w-full rounded-md bg-[#5865f2] py-2 text-sm font-semibold text-white hover:bg-[#4956d8] transition-colors" disabled={savingStatus} onClick={saveStatus}>{savingStatus ? 'Saving…' : 'Save status'}</button>
         </Modal>
-      ) : null}
+      )}
 
-      {activeModal === 'user-settings' ? (
+      {activeModal === 'user-settings' && (
         <Modal onClose={() => setActiveModal(null)} title="Preferences">
-          <div className="space-y-6">
-            <div className="flex flex-col items-center">
-              <div className="w-full h-24 rounded-t-lg bg-gray-700 overflow-hidden relative">
-                {getBannerUrl(users[auth.userId], config.cdnUrl)
-                  ? <img src={getBannerUrl(users[auth.userId], config.cdnUrl)} alt="Banner" className="w-full h-full object-cover" />
-                  : <div className="w-full h-full bg-gradient-to-r from-[#3b3f6b] to-[#5865f2]" />
-                }
-                <div className="absolute -bottom-8 left-4 p-1 bg-[#1e1f22] rounded-full">
-                  <Avatar user={users[auth.userId]} cdnUrl={config.cdnUrl} size="lg" />
-                </div>
-              </div>
-              <div className="w-full px-4 pt-10">
-                <h2 className="text-xl font-bold text-white">{users[auth.userId]?.username || 'User'}</h2>
-                <p className="text-xs text-gray-400">#{users[auth.userId]?.discriminator || '0000'}</p>
-              </div>
+          <div className="flex flex-col items-stretch">
+            <div className="h-24 rounded-lg overflow-hidden relative">
+              {bannerUrl(users[auth.userId], config.cdnUrl)
+                ? <img src={bannerUrl(users[auth.userId], config.cdnUrl)} alt="" className="w-full h-full object-cover" />
+                : <div className="w-full h-full bg-gradient-to-r from-[#3b3f6b] to-[#5865f2]" />
+              }
+              <div className="absolute -bottom-7 left-4 p-1 bg-[#1e1f22] rounded-full"><Avatar user={users[auth.userId]} cdn={config.cdnUrl} size="lg" /></div>
             </div>
-            <div className="border-t border-[#2f3237] pt-4 px-4 space-y-3">
-              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wide">About Ermine</h3>
-              <div className="flex items-start gap-3 bg-[#2b2d31] p-3 rounded-lg">
-                <div className="p-2 bg-[#5865f2] rounded-lg"><Smile size={20} className="text-white" /></div>
-                <div>
-                  <h4 className="text-sm font-bold text-white">Support Stoat Chat</h4>
-                  <p className="text-xs text-gray-400 mt-1">Ermine is built for the Stoat community. Consider donating to keep the lights on!</p>
-                  <a href="https://ko-fi.com/stoatchat" target="_blank" rel="noopener noreferrer" className="inline-block mt-2 text-xs font-semibold text-[#5865f2] hover:underline">Donate on Ko-fi →</a>
-                </div>
-              </div>
-              <div className="flex items-start gap-3 bg-[#2b2d31] p-3 rounded-lg">
-                <div className="p-2 bg-gray-700 rounded-lg"><AlertCircle size={20} className="text-white" /></div>
-                <div>
-                  <h4 className="text-sm font-bold text-white">Client Info</h4>
-                  <p className="text-xs text-gray-400 mt-1">
-                    Version: 1.3.0<br />
-                    Mode: {isLowSpec ? 'Lite (Performance)' : 'Standard'}
-                  </p>
-                </div>
+            <div className="pt-10 px-1">
+              <div className="text-xl font-bold text-white">{users[auth.userId]?.username || 'User'}</div>
+              <div className="text-xs text-gray-400">#{users[auth.userId]?.discriminator || '0000'}</div>
+            </div>
+          </div>
+          <div className="border-t border-[#2f3237] pt-3 space-y-2">
+            <div className="text-xs font-bold uppercase tracking-wide text-gray-400 mb-2">About Ermine</div>
+            <div className="flex items-start gap-3 bg-[#2b2d31] p-3 rounded-lg">
+              <div className="p-2 bg-gray-700 rounded-lg"><AlertCircle size={18} className="text-white" /></div>
+              <div>
+                <div className="text-sm font-bold text-white">Version 0.2.0</div>
+                <div className="text-xs text-gray-400 mt-0.5">Mode: {isLowSpec ? 'Lite' : 'Standard'}</div>
+                <a href="https://ko-fi.com/stoatchat" target="_blank" rel="noopener noreferrer" className="text-xs text-[#5865f2] hover:underline mt-1 inline-block">Support Stoat on Ko-fi →</a>
               </div>
             </div>
           </div>
         </Modal>
-      ) : null}
+      )}
 
-      {linkPromptUrl ? (
-        <Modal onClose={() => setLinkPromptUrl(null)} title="Ermine link check">
-          <div className="rounded-md bg-[#1e1f22] p-3 text-sm text-gray-200">
-            <p className="text-xs uppercase tracking-wide text-gray-500">Do you trust this link?</p>
-            <p className="mt-2 break-all text-[#bdc3ff]">{linkPromptUrl}</p>
-            <p className="mt-2 text-xs text-gray-400">Only open links from contacts and spaces you trust.</p>
+      {linkPromptUrl && (
+        <Modal onClose={() => setLinkPromptUrl(null)} title="Open link?">
+          <div className="rounded bg-[#1e1f22] p-3">
+            <p className="text-xs text-gray-500 mb-1">Do you trust this link?</p>
+            <p className="break-all text-sm text-[#bdc3ff]">{linkPromptUrl}</p>
           </div>
           <div className="grid grid-cols-2 gap-2">
-            <button className="rounded-md bg-[#3a3d42] py-2 text-sm font-semibold text-gray-200 hover:bg-[#4a4d55] transition-colors" onClick={() => setLinkPromptUrl(null)} type="button">Cancel</button>
-            <button className="rounded-md bg-[#5865f2] py-2 text-sm font-semibold text-white hover:bg-[#4956d8] transition-colors" onClick={confirmOpenLink} type="button">Open link</button>
+            <button className="rounded-md bg-[#3a3d42] py-2 text-sm font-semibold text-gray-200 hover:bg-[#4a4d55] transition-colors" onClick={() => setLinkPromptUrl(null)}>Cancel</button>
+            <button className="rounded-md bg-[#5865f2] py-2 text-sm font-semibold text-white hover:bg-[#4956d8] transition-colors" onClick={confirmLink}>Open link</button>
           </div>
         </Modal>
-      ) : null}
+      )}
 
-      {peekUser ? (
-        <Modal onClose={() => setPeekUser(null)} title="Member profile">
+      {peekUser && (
+        <Modal onClose={() => setPeekUser(null)} title="Profile">
           <div className="overflow-hidden rounded-lg bg-[#1e1f22]">
-            {peekBannerUrl
-              ? <img alt="Profile banner" className="h-24 w-full object-cover" src={peekBannerUrl} />
-              : <div className="h-20 w-full bg-gradient-to-r from-[#3b3f6b] to-[#5865f2]" />
-            }
+            {peekBanner ? <img alt="" className="h-24 w-full object-cover" src={peekBanner} /> : <div className="h-20 bg-gradient-to-r from-[#3b3f6b] to-[#5865f2]" />}
             <div className="flex items-center gap-3 p-3">
-              <Avatar alwaysAnimate cdnUrl={config.cdnUrl} size="lg" user={peekUser} />
-              <div>
-                <div className="text-base font-semibold text-white">{peekUser?.username || 'Loading user…'}</div>
-                <div className="text-xs text-gray-400">#{peekUser?.discriminator || '0000'}</div>
+              <Avatar user={peekUser} cdn={config.cdnUrl} size="lg" always />
+              <div className="min-w-0">
+                <div className="text-base font-semibold text-white">{peekUser.username}</div>
+                <div className="text-xs text-gray-400">#{peekUser.discriminator || '0000'}</div>
+                {users[peekUser._id]?.status?.text && <div className="text-xs text-gray-300 mt-0.5 truncate">{users[peekUser._id].status.text}</div>}
               </div>
-              {peekUser?._id && peekUser._id !== auth.userId && (
-                <button className="ml-auto rounded bg-[#5865f2] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#4956d8] transition-colors" onClick={() => { openDmWithUser(peekUser._id); setPeekUser(null); }} type="button">Message</button>
+              {peekUser._id !== auth.userId && (
+                <div className="ml-auto flex gap-1.5">
+                  <button className="rounded bg-[#5865f2] px-2 py-1 text-xs font-semibold text-white hover:bg-[#4956d8] transition-colors" onClick={() => { openDm(peekUser._id); setPeekUser(null); }}><MessageSquare size={13} /></button>
+                  {friends.some((f) => f._id === peekUser._id)
+                    ? <button className="rounded bg-[#ed4245]/20 px-2 py-1 text-xs text-red-300 hover:bg-[#ed4245]/30 transition-colors" onClick={() => removeFriend(peekUser._id)} title="Remove friend"><UserX size={13} /></button>
+                    : <button className="rounded bg-[#3ba55d]/20 px-2 py-1 text-xs text-green-300 hover:bg-[#3ba55d]/30 transition-colors" onClick={() => sendFriendRequest(peekUser.username)} title="Send friend request"><UserPlus size={13} /></button>
+                  }
+                </div>
               )}
             </div>
           </div>
           <div className="grid grid-cols-2 gap-2 rounded-md bg-[#1e1f22] p-3 text-xs text-gray-300">
-            <p><span className="font-semibold text-gray-100">Joined platform:</span><br />{toDateLabel(peekPlatformJoined)}</p>
-            <p><span className="font-semibold text-gray-100">Joined space:</span><br />{selectedServerId === '@me' ? 'N/A' : toDateLabel(peekServerJoined)}</p>
+            <div><span className="font-semibold text-gray-100 block mb-0.5">Joined platform</span>{dateLabel(peekJoined)}</div>
+            <div><span className="font-semibold text-gray-100 block mb-0.5">Joined space</span>{selServer === '@me' ? 'N/A' : dateLabel(peekSrvJoined)}</div>
           </div>
-          <div className="space-y-1 rounded-md bg-[#1e1f22] p-3">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">About me</p>
-            <p className="text-sm text-gray-200">{peekAboutMe || 'No about me set.'}</p>
-          </div>
-          {peekBadges.length > 0 && (
-            <div className="space-y-1 rounded-md bg-[#1e1f22] p-3">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Badges</p>
-              <div className="flex flex-wrap gap-1.5">{peekBadges.map((b) => <span className="rounded bg-[#5865f2]/20 px-2 py-1 text-xs text-[#d7ddff]" key={b}>{b}</span>)}</div>
-            </div>
-          )}
-          {peekRoles.length > 0 && (
-            <div className="space-y-1 rounded-md bg-[#1e1f22] p-3">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Roles</p>
-              <div className="flex flex-wrap gap-1.5">{peekRoles.map((role) => <span className="rounded bg-[#3a3d42] px-2 py-1 text-xs text-gray-200" key={role.name} style={{ borderLeft: `3px solid ${role.colour || '#4c4f56'}` }}>{role.name}</span>)}</div>
-            </div>
-          )}
+          {peekBio && <div className="rounded-md bg-[#1e1f22] p-3"><p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1">About me</p><p className="text-sm text-gray-200">{peekBio}</p></div>}
+          {peekBadges.length > 0 && <div className="rounded-md bg-[#1e1f22] p-3"><p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1">Badges</p><div className="flex flex-wrap gap-1">{peekBadges.map((b) => <span key={b} className="rounded bg-[#5865f2]/20 px-2 py-0.5 text-xs text-[#d7ddff]">{b}</span>)}</div></div>}
+          {peekRoles.length > 0 && <div className="rounded-md bg-[#1e1f22] p-3"><p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1">Roles</p><div className="flex flex-wrap gap-1">{peekRoles.map((r) => <span key={r.id || r.name} className="rounded px-2 py-0.5 text-xs text-gray-200 border-l-2" style={{ background: '#2b2d31', borderColor: r.colour || '#4c4f56' }}>{r.name}</span>)}</div></div>}
         </Modal>
-      ) : null}
+      )}
 
-      {/* ── Server rail ── */}
+      {/* ════ SERVER RAIL ════ */}
       <aside className="flex w-[72px] flex-col items-center gap-2 overflow-y-auto bg-[#111214] py-3 shrink-0">
-        <button
-          className={`grid h-12 w-12 place-items-center transition-all duration-150 ${selectedServerId === '@me' ? 'rounded-2xl bg-[#5865f2]' : 'rounded-full bg-[#313338] hover:rounded-2xl hover:bg-[#5865f2]'}`}
-          onClick={() => handleServerSelect('@me')}
-          title="Direct messages"
-        >
-          <MessageSquare size={20} />
-        </button>
+        <button className={`grid h-12 w-12 place-items-center transition-all duration-150 ${selServer === '@me' ? 'rounded-2xl bg-[#5865f2]' : 'rounded-full bg-[#313338] hover:rounded-2xl hover:bg-[#5865f2]'}`} onClick={() => selectServer('@me')} title="Direct messages"><MessageSquare size={20} /></button>
         <div className="h-px w-8 bg-[#202225]" />
-        {serverList.map((server) => {
-          const icon   = getIconUrl(server, config.cdnUrl);
-          const active = selectedServerId === server._id;
+        {serverList.map((s) => {
+          const ic = iconUrl(s, config.cdnUrl); const active = selServer === s._id;
           return (
-            <button
-              className={`relative grid h-12 w-12 place-items-center overflow-hidden transition-all duration-150 ${active ? 'rounded-2xl bg-[#5865f2]' : 'rounded-full bg-[#313338] hover:rounded-2xl hover:bg-[#5865f2]'}`}
-              key={server._id}
-              onClick={() => handleServerSelect(server._id)}
-              title={server.name}
-            >
-              {icon
-                ? <img alt={server.name} className="h-full w-full object-contain p-1" src={icon} />
-                : <span className="text-sm font-bold">{server.name.slice(0, 2).toUpperCase()}</span>
-              }
-            </button>
+            <div key={s._id} className="relative">
+              <button className={`grid h-12 w-12 place-items-center overflow-hidden transition-all duration-150 ${active ? 'rounded-2xl bg-[#5865f2]' : 'rounded-full bg-[#313338] hover:rounded-2xl hover:bg-[#5865f2]'}`} onClick={() => selectServer(s._id)} title={s.name}>
+                {ic ? <img alt={s.name} className="h-full w-full object-contain p-1" src={ic} /> : <span className="text-sm font-bold">{s.name.slice(0,2).toUpperCase()}</span>}
+              </button>
+              {/* Unread indicator */}
+              {Object.values(channels).some((c) => c.server === s._id && unreadChannels.has(c._id)) && !active && (
+                <span className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full bg-white unread-dot pointer-events-none" />
+              )}
+            </div>
           );
         })}
-        <button className="grid h-12 w-12 place-items-center rounded-full bg-[#313338] text-[#3ba55d] transition-all duration-150 hover:rounded-2xl hover:bg-[#3ba55d] hover:text-white" onClick={() => setActiveModal('create-server')} title="Create a space">
-          <Plus size={20} />
-        </button>
-        <button className="grid h-12 w-12 place-items-center rounded-full bg-[#313338] text-green-500 transition-all duration-150 hover:rounded-2xl hover:bg-green-600 hover:text-white" onClick={() => setActiveModal('discovery')} title="Space Discovery">
-          <Search size={20} />
-        </button>
+        <button className="grid h-12 w-12 place-items-center rounded-full bg-[#313338] text-[#3ba55d] transition-all duration-150 hover:rounded-2xl hover:bg-[#3ba55d] hover:text-white" onClick={() => setActiveModal('create-server')} title="Create a space"><Plus size={20} /></button>
+        <button className="grid h-12 w-12 place-items-center rounded-full bg-[#313338] text-blue-400 transition-all duration-150 hover:rounded-2xl hover:bg-blue-600 hover:text-white" onClick={() => setActiveModal('join-server')} title="Join a space"><Link size={18} /></button>
       </aside>
 
-      {/* ── Channel sidebar ── */}
-      <aside className={`${showMobileSidebar ? 'flex' : 'hidden'} md:flex w-60 flex-col bg-[#2b2d31] shrink-0 z-30 md:z-auto absolute md:relative h-full`}>
-        <div className="border-b border-[#202225] px-4 py-3 flex justify-between items-center">
-          <div className="truncate text-sm font-bold text-white">{selectedServerId === '@me' ? 'Live' : servers[selectedServerId]?.name || 'Space'}</div>
-          {isServerOwner && selectedServerId !== '@me' && (
-            <button onClick={openServerSettings} className="text-gray-400 hover:text-white transition-colors" title="Space Settings">
-              <Settings size={16} />
-            </button>
-          )}
+      {/* ════ CHANNEL SIDEBAR ════ */}
+      <aside className={`${showMobileSide ? 'flex' : 'hidden'} md:flex w-60 flex-col bg-[#2b2d31] shrink-0 z-30 md:z-auto absolute md:relative h-full`}>
+        {/* Server header */}
+        <div className="border-b border-[#202225] px-4 py-3 flex justify-between items-center shrink-0">
+          <div className="truncate text-sm font-bold text-white">{selServer === '@me' ? 'Live' : selServerObj?.name || 'Space'}</div>
+          <div className="flex items-center gap-1">
+            {isOwner && selServer !== '@me' && <>
+              <button onClick={() => setActiveModal('create-invite')} className="text-gray-400 hover:text-white transition-colors p-0.5" title="Create invite"><Link size={14} /></button>
+              <button onClick={() => { setEditServerName(selServerObj.name); setActiveModal('server-settings'); }} className="text-gray-400 hover:text-white transition-colors p-0.5" title="Space Settings"><Settings size={14} /></button>
+            </>}
+          </div>
         </div>
+
+        {/* Channel list */}
         <div className="flex-1 overflow-y-auto p-2">
-          {selectedServerId === '@me' ? (
+          {selServer === '@me' ? (
             <>
-              <button
-                className={`mb-1 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors ${selectedChannelId === 'friends' ? 'bg-[#404249] text-white' : 'text-gray-400 hover:bg-[#35373c] hover:text-white'}`}
-                onClick={() => handleChannelSelect('friends')}
-              >
+              <button className={`mb-0.5 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors ${selChannel === 'friends' ? 'bg-[#404249] text-white' : 'text-gray-400 hover:bg-[#35373c] hover:text-white'}`} onClick={() => { setSelChannel('friends'); setShowMobileSide(false); }}>
                 <Users size={16} /> <span>Direct</span>
               </button>
-              {directMessageChannels.map((channel) => {
-                const recipientId = (channel.recipients || []).find((id) => id !== auth.userId);
-                const recipient   = users[recipientId];
-                const label       = recipient?.username || channel.name || 'Loading direct…';
+              {dmChannels.map((ch) => {
+                const label = dmLabel(ch);
+                const icon  = chIcon(ch);
+                const rid   = ch.channel_type === 'DirectMessage' ? (ch.recipients || []).find((id) => id !== auth.userId) : null;
+                const unread = unreadChannels.has(ch._id);
                 return (
-                  <button
-                    className={`mb-0.5 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors ${selectedChannelId === channel._id ? 'bg-[#404249] text-white' : 'text-gray-400 hover:bg-[#35373c] hover:text-white'}`}
-                    key={channel._id}
-                    onClick={() => handleChannelSelect(channel._id)}
-                  >
-                    <MessageSquare size={16} />
-                    <span className="truncate">{label}</span>
+                  <button key={ch._id} className={`mb-0.5 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors ${selChannel === ch._id ? 'bg-[#404249] text-white' : `text-gray-400 hover:bg-[#35373c] hover:text-white ${unread ? 'text-white' : ''}`}`} onClick={() => selectChannel(ch._id)}>
+                    {rid ? <Avatar user={users[rid]} cdn={config.cdnUrl} size="sm" /> : <span className="text-gray-400">{icon}</span>}
+                    <span className="truncate flex-1">{label}</span>
+                    {unread && <span className="unread-dot w-2 h-2 rounded-full bg-white shrink-0" />}
                   </button>
                 );
               })}
             </>
           ) : (
-            channelList.map((channel) => {
-              const isVoice = channel?.channel_type === 'VoiceChannel';
+            categorisedChannels.map((item, i) => {
+              if (item.type === 'category') {
+                const collapsed = collapsedCats[item.id];
+                return (
+                  <button key={item.id} className="flex w-full items-center gap-1 px-1 py-1 text-left" onClick={() => setCollapsedCats((p) => ({ ...p, [item.id]: !p[item.id] }))}>
+                    {collapsed ? <ChevronRight size={12} className="text-gray-500 shrink-0" /> : <ChevronDown size={12} className="text-gray-500 shrink-0" />}
+                    <span className="text-xs font-bold uppercase tracking-wide text-gray-400 truncate">{item.title}</span>
+                  </button>
+                );
+              }
+              // type === 'channel'
+              const ch = item.channel; const isVoice = ch.channel_type === 'VoiceChannel'; const unread = unreadChannels.has(ch._id);
               return (
-                <button
-                  className={`mb-0.5 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors ${isVoice ? 'cursor-not-allowed text-gray-500 hover:bg-[#2f3237]' : selectedChannelId === channel._id ? 'bg-[#404249] text-white' : 'text-gray-400 hover:bg-[#35373c] hover:text-white'}`}
-                  key={channel._id}
-                  onClick={() => handleChannelSelect(channel._id)}
-                  title={isVoice ? "Voice channels are not supported in Ermine." : channel.name}
-                >
-                  {isVoice ? <Users size={16} /> : <Hash size={16} />}
-                  <span className="truncate">{channel.name || 'channel'}</span>
+                <button key={ch._id} className={`mb-0.5 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors ${isVoice ? 'cursor-not-allowed text-gray-500' : selChannel === ch._id ? 'bg-[#404249] text-white' : `text-gray-400 hover:bg-[#35373c] hover:text-white ${unread ? 'text-white font-semibold' : ''}`}`}
+                  onClick={() => selectChannel(ch._id)} title={ch.name}>
+                  <span className={isVoice ? 'text-gray-600' : 'text-gray-400'}>{chIcon(ch)}</span>
+                  <span className="truncate flex-1">{ch.name || 'channel'}</span>
+                  {unread && <span className="unread-dot w-2 h-2 rounded-full bg-white shrink-0" />}
+                  {ch.nsfw && <span className="text-[9px] text-red-400 font-bold">NSFW</span>}
                 </button>
               );
             })
@@ -1951,284 +1801,204 @@ function AppShell() {
         </div>
 
         {/* Account footer */}
-        <div className="border-t border-[#202225] p-2">
-          <div className="flex items-center justify-between rounded bg-[#232428] p-2" onMouseEnter={() => setIsAccountHovered(true)} onMouseLeave={() => setIsAccountHovered(false)}>
+        <div className="border-t border-[#202225] p-2 shrink-0">
+          <div className="flex items-center justify-between rounded bg-[#232428] p-2" onMouseEnter={() => setIsAccHovered(true)} onMouseLeave={() => setIsAccHovered(false)}>
             <button className="flex min-w-0 items-center gap-2 rounded p-1 text-left hover:bg-[#2d3036] flex-1" onClick={openStatusEditor} type="button">
-              <Avatar alwaysAnimate={isAccountHovered} cdnUrl={config.cdnUrl} size="sm" user={users[auth.userId]} />
+              <Avatar user={users[auth.userId]} cdn={config.cdnUrl} size="sm" always={isAccHovered} />
               <div className="min-w-0">
                 <div className="truncate text-xs font-semibold text-white">{users[auth.userId]?.username || 'Connected'}</div>
-                <div className="truncate text-[10px] uppercase tracking-wide text-gray-400">{users[auth.userId]?.status?.text || status}</div>
+                <div className="truncate text-[10px] text-gray-400">{users[auth.userId]?.status?.text || status}</div>
               </div>
             </button>
-            <div className="flex items-center gap-1 shrink-0">
-              <button className="rounded p-1 text-gray-400 hover:bg-[#35373c] hover:text-white transition-colors" onClick={() => setActiveModal('user-settings')} title="Preferences" type="button"><Settings size={14} /></button>
-              <button className="rounded p-1 text-gray-400 hover:bg-[#35373c] hover:text-white transition-colors" onClick={logout} title="Logout" type="button"><LogOut size={14} /></button>
+            <div className="flex items-center gap-0.5 shrink-0">
+              <button className="rounded p-1 text-gray-400 hover:text-white transition-colors" onClick={() => setActiveModal('user-settings')} title="Preferences"><Settings size={13} /></button>
+              <button className="rounded p-1 text-gray-400 hover:text-white transition-colors" onClick={logout} title="Logout"><LogOut size={13} /></button>
             </div>
           </div>
         </div>
       </aside>
 
-      {/* Mobile sidebar backdrop */}
-      {showMobileSidebar && <div className="fixed inset-0 z-20 bg-black/60 md:hidden" onClick={() => setShowMobileSidebar(false)} />}
+      {/* Mobile backdrop */}
+      {showMobileSide && <div className="fixed inset-0 z-20 bg-black/60 md:hidden" onClick={() => setShowMobileSide(false)} />}
 
-      {/* ── Main content ── */}
+      {/* ════ MAIN ════ */}
       <main className="relative flex min-w-0 flex-1 flex-col bg-[#313338]">
-        <header className="flex items-center justify-between border-b border-[#202225] px-4 py-3">
-          <div className="flex items-center gap-2">
-            <button className="md:hidden mr-1 text-gray-400 hover:text-white transition-colors" onClick={() => setShowMobileSidebar((p) => !p)} type="button">
-              <Menu size={20} />
-            </button>
-            <div className="flex items-center gap-2 text-sm font-semibold text-white">
-              {channels[selectedChannelId]?.channel_type === 'DirectMessage'
-                ? <MessageSquare size={17} className="text-gray-400" />
-                : <Hash size={17} className="text-gray-400" />
-              }
-              <span>{currentChannelName}</span>
-            </div>
-            {currentChannelTopic && (
-              <span className="hidden lg:block text-xs text-gray-400 border-l border-[#3f4249] pl-2 ml-1 truncate max-w-xs" title={currentChannelTopic}>{currentChannelTopic}</span>
-            )}
+        {/* Header */}
+        <header className="flex items-center justify-between border-b border-[#202225] px-4 py-2.5 shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <button className="md:hidden text-gray-400 hover:text-white transition-colors mr-1" onClick={() => setShowMobileSide((p) => !p)}><Menu size={20} /></button>
+            <span className="text-gray-400 shrink-0">{chIcon(channels[selChannel])}</span>
+            <span className="text-sm font-semibold text-white truncate">{curChName}</span>
+            {curChTopic && <span className="hidden lg:block text-xs text-gray-400 border-l border-[#3f4249] pl-2 ml-1 truncate max-w-xs">{curChTopic}</span>}
           </div>
-          <StatusBadge status={status} />
+          <div className="flex items-center gap-2 shrink-0">
+            {selChannel !== 'friends' && (
+              <>
+                <button className="text-gray-400 hover:text-white transition-colors p-1" onClick={() => { fetchPins(selChannel); setActiveModal('pinned'); }} title="Pinned messages"><Pin size={16} /></button>
+                {isOwner && selServer !== '@me' && selChannel !== 'friends' && (
+                  <button className="text-gray-400 hover:text-white transition-colors p-1" onClick={() => setActiveModal('create-invite')} title="Create invite"><Link size={16} /></button>
+                )}
+              </>
+            )}
+            <StatusBadge status={status} />
+          </div>
         </header>
 
-        {voiceNotice ? (
-          <div className="mx-4 mt-3 rounded-md border border-[#665200] bg-[#5c4a00]/25 px-3 py-2 text-xs text-yellow-200">
-            {voiceNotice}
-          </div>
-        ) : null}
+        {voiceNotice && <div className="mx-4 mt-2 rounded-md border border-[#665200] bg-[#5c4a00]/25 px-3 py-2 text-xs text-yellow-200">{voiceNotice}</div>}
 
-        <section className="flex-1 overflow-y-auto py-2" ref={messagesContainerRef}>
-          {/* Load-older spinner */}
+        {/* Message area */}
+        <section className="flex-1 overflow-y-auto py-2" ref={scrollRef}>
           {isLoadingOlder && (
-            <div className="flex items-center justify-center py-3 text-xs text-gray-400 gap-2">
-              <Loader className="animate-spin" size={14} /> Loading older messages…
+            <div className="flex items-center justify-center gap-2 py-3 text-xs text-gray-400">
+              <Loader className="animate-spin" size={13} /> Loading older messages…
             </div>
           )}
 
-          {selectedChannelId === 'friends' ? (
-            <div className="space-y-2 p-4">
-              <h2 className="text-xs font-bold uppercase tracking-wide text-gray-400">Direct ({friends.length})</h2>
-              {friends.length === 0
-                ? <p className="text-sm text-gray-400">No direct contacts available yet.</p>
-                : null
-              }
-              {friends.map((friend) => (
-                <button className="flex w-full items-center gap-3 rounded bg-[#2b2d31] p-3 text-left hover:bg-[#35373c] transition-colors" key={friend._id} onClick={() => openDmWithUser(friend._id)}>
-                  <Avatar animateOnHover cdnUrl={config.cdnUrl} user={friend} />
+          {selChannel === 'friends' ? (
+            <div className="space-y-1.5 p-4">
+              <h2 className="text-xs font-bold uppercase tracking-wide text-gray-400 mb-3">Direct ({friends.length})</h2>
+              {friends.length === 0 && <p className="text-sm text-gray-400">No direct contacts yet.</p>}
+              {friends.map((f) => (
+                <button key={f._id} className="flex w-full items-center gap-3 rounded-lg bg-[#2b2d31] p-3 text-left hover:bg-[#35373c] transition-colors" onClick={() => openDm(f._id)}>
+                  <Avatar user={f} cdn={config.cdnUrl} hover />
                   <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold text-white">{friend.username}</div>
-                    <div className="text-xs text-gray-400">{friend.status?.text || 'Direct'}</div>
+                    <div className="truncate text-sm font-semibold text-white">{f.username}</div>
+                    <div className="text-xs text-gray-400 truncate">{f.status?.text || f.status?.presence || 'Offline'}</div>
                   </div>
+                  {unreadChannels.has(Object.values(channels).find((c) => c.channel_type === 'DirectMessage' && (c.recipients || []).includes(f._id))?._id || '') && <span className="ml-auto unread-dot w-2 h-2 rounded-full bg-white shrink-0" />}
                 </button>
               ))}
             </div>
-          ) : currentMessages.length === 0 ? (
+          ) : curMsgs.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center p-8 text-gray-400">
-              <Hash size={40} className="mb-3 opacity-30" />
+              <Hash size={40} className="mb-3 opacity-25" />
               <p className="text-sm font-semibold">No messages yet</p>
-              <p className="text-xs mt-1 opacity-70">Be the first to say something!</p>
+              <p className="text-xs mt-1 opacity-60">Be the first to say something!</p>
             </div>
           ) : (
-            currentMessages.map((message, index) => {
-              const prev         = index > 0 ? currentMessages[index - 1] : null;
-              const showSep      = prev && getMessageDayKey(prev) !== getMessageDayKey(message);
-              const showTopSep   = index === 0;
+            curMsgs.map((msg, idx) => {
+              const prev = idx > 0 ? curMsgs[idx - 1] : null;
               return (
-                <React.Fragment key={message._id}>
-                  {showTopSep && <DateSeparator message={message} />}
-                  {showSep    && <DateSeparator message={message} />}
+                <React.Fragment key={msg._id}>
+                  {(idx === 0 || (prev && dayKey(prev) !== dayKey(msg))) && <DateSep msg={msg} />}
                   <Message
-                    message={message}
-                    users={users}
-                    channels={channels}
-                    me={auth.userId}
-                    onUserClick={openUserProfile}
-                    cdnUrl={config.cdnUrl}
-                    onToggleReaction={toggleReaction}
-                    onReply={setReplyingTo}
-                    replyTarget={replyingTo?._id}
-                    onJumpToMessage={jumpToMessage}
-                    registerMessageRef={registerMessageRef}
-                    customEmojiById={customEmojiById}
-                    reactionOptions={reactionOptions}
-                    onRequestOpenLink={requestOpenLink}
-                    onEditMessage={editMessage}
-                    onDeleteMessage={deleteMessage}
-                    replyMessageMap={globalReplyMessageMap}
+                    message={msg} users={users} channels={channels} me={auth.userId}
+                    onUser={(u, id) => setPeekUser({ ...u, _id: id || u._id })}
+                    cdn={config.cdnUrl} onReact={toggleReaction} onReply={setReplyingTo}
+                    replyTarget={replyingTo?._id} jumpTo={jumpTo} regRef={regRef}
+                    ceById={ceById} reactOpts={reactOpts} openLink={openLink}
+                    onEdit={editMessage} onDelete={deleteMessage} replyMap={replyMsgMap}
                   />
                 </React.Fragment>
               );
             })
           )}
-          <div ref={messagesBottomRef} />
+          <div ref={botRef} />
         </section>
 
-        {showGoLatest ? (
+        {/* Typing indicator */}
+        <TypingIndicator userIds={curTypingIds} users={users} />
+
+        {showGoLatest && (
           <div className="pointer-events-none absolute bottom-24 left-1/2 z-20 -translate-x-1/2">
-            <button
-              className="pointer-events-auto rounded-full bg-[#5865f2] px-3 py-1.5 text-xs font-semibold text-white shadow-lg hover:bg-[#4956d8] transition-colors"
-              onClick={goToLatest}
-              type="button"
-            >
-              ↓ Go to latest
-            </button>
+            <button className="pointer-events-auto rounded-full bg-[#5865f2] px-3 py-1.5 text-xs font-semibold text-white shadow-lg hover:bg-[#4956d8] transition-colors" onClick={goLatest}>↓ Latest</button>
           </div>
-        ) : null}
+        )}
 
         {/* ── Composer ── */}
-        <footer className="border-t border-[#202225] p-4">
-          {activeReply ? (
-            <div className="mb-2 flex items-center justify-between gap-2 rounded-md bg-[#2b2d31] px-3 py-2 text-xs text-gray-300">
-              <span className="truncate flex items-center gap-1">
-                <Reply size={11} className="shrink-0" />
-                Replying to {users[typeof activeReply.author === 'string' ? activeReply.author : activeReply.author?._id]?.username || 'Loading user…'}: {activeReply.content || 'Attachment / embed'}
-              </span>
-              <button className="rounded p-1 text-gray-400 hover:bg-[#3a3d42] hover:text-white transition-colors shrink-0" onClick={() => setReplyingTo(null)} type="button"><X size={13} /></button>
+        <footer className="border-t border-[#202225] px-4 pt-2 pb-4 shrink-0">
+          {activeReply && (
+            <div className="mb-2 flex items-center gap-2 rounded bg-[#2b2d31] px-3 py-1.5 text-xs text-gray-300">
+              <Reply size={11} className="shrink-0 text-gray-400" />
+              <span className="truncate flex-1">Replying to <strong>{users[typeof activeReply.author === 'string' ? activeReply.author : activeReply.author?._id]?.username || '…'}</strong>: {activeReply.content || 'attachment'}</span>
+              <button className="shrink-0 text-gray-400 hover:text-white transition-colors" onClick={() => setReplyingTo(null)}><X size={12} /></button>
             </div>
-          ) : null}
+          )}
 
-          {pendingFiles.length > 0 ? (
-            <div className="mb-2 flex flex-wrap gap-1.5">
-              {pendingFiles.map((file, index) => (
-                <button
-                  className="flex items-center gap-2 rounded bg-[#2b2d31] px-2 py-1 text-xs text-gray-200 hover:bg-[#35373c] transition-colors"
-                  key={`${file.name}-${index}`}
-                  onClick={() => removePendingFile(index)}
-                  type="button"
-                >
-                  <span>{isImageLike(file.name, file.type) ? '🖼️' : '📎'}</span>
-                  <span>{file.name} <span className="text-gray-400">(remove)</span></span>
+          {pendingFiles.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-1">
+              {pendingFiles.map((f, i) => (
+                <button key={`${f.name}-${i}`} className="flex items-center gap-1.5 rounded bg-[#2b2d31] px-2 py-1 text-xs text-gray-200 hover:bg-[#35373c] transition-colors" onClick={() => setPendingFiles((p) => p.filter((_, x) => x !== i))}>
+                  {isImg(f.name, f.type) ? '🖼️' : '📎'} {f.name} <X size={11} className="ml-0.5 opacity-60" />
                 </button>
               ))}
             </div>
-          ) : null}
+          )}
 
-          <div
-            className="flex items-end gap-2 rounded-lg bg-[#383a40] px-2 py-2"
-            onDragOver={handleComposerDragOver}
-            onDrop={handleComposerDrop}
-          >
-            <button
-              className="rounded p-2 text-gray-300 hover:bg-[#4b4d55] hover:text-white transition-colors mb-0.5"
-              disabled={selectedChannelId === 'friends' || isUploadingFiles}
-              onClick={() => fileInputRef.current?.click()}
-              title="Upload files"
-              type="button"
-            >
-              <Paperclip size={16} />
-            </button>
-            <input className="hidden" multiple onChange={handleFilePick} ref={fileInputRef} type="file" />
+          <div className="flex items-end gap-2 rounded-lg bg-[#383a40] px-2 py-2"
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => { e.preventDefault(); const f = Array.from(e.dataTransfer?.files || []); if (f.length) setPendingFiles((p) => [...p, ...f]); }}>
+            <button className="p-2 text-gray-300 hover:text-white transition-colors mb-0.5 shrink-0" disabled={selChannel === 'friends' || isUploading} onClick={() => fileInputRef.current?.click()} title="Attach file"><Paperclip size={16} /></button>
+            <input className="hidden" multiple onChange={onFilePick} ref={fileInputRef} type="file" />
 
-            <div className="relative">
-              <button
-                className="rounded p-2 text-gray-300 hover:bg-[#4b4d55] hover:text-white transition-colors mb-0.5"
-                disabled={selectedChannelId === 'friends'}
-                onClick={() => setShowEmojiPicker((p) => !p)}
-                type="button"
-              >
-                <Smile size={16} />
+            <div className="relative shrink-0">
+              <button className="p-2 text-gray-300 hover:text-white transition-colors mb-0.5" disabled={selChannel === 'friends'} onClick={() => setShowEmojiPicker((p) => !p)}>
+                <span className="text-base leading-none select-none">😊</span>
               </button>
-              {showEmojiPicker && selectedChannelId !== 'friends' ? (
-                <div
-                  ref={pickerRef}
-                  className="absolute bottom-12 left-0 z-20 w-72 rounded-lg border border-[#4c4f56] bg-[#232428] shadow-2xl max-h-72 overflow-hidden flex flex-col"
-                >
-                  <div className="p-2 border-b border-[#2f3237]">
-                    <input
-                      className="w-full rounded bg-[#1e1f22] px-2 py-1 text-xs text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-[#5865f2]"
-                      placeholder={allCustomEmojis.length > 0 ? 'Search custom emojis…' : 'Standard emojis below'}
-                      value={emojiSearch}
-                      onChange={(e) => setEmojiSearch(e.target.value)}
-                    />
+              {showEmojiPicker && selChannel !== 'friends' && (
+                <div ref={pickerRef} className="absolute bottom-12 left-0 z-20 w-72 rounded-lg border border-[#4c4f56] bg-[#232428] shadow-2xl max-h-72 overflow-hidden flex flex-col">
+                  <div className="p-2 border-b border-[#2f3237] shrink-0">
+                    <input className="w-full rounded bg-[#1e1f22] px-2 py-1 text-xs text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-[#5865f2]" placeholder="Search custom emojis…" value={emojiSearch} onChange={(e) => setEmojiSearch(e.target.value)} />
                   </div>
                   <div className="overflow-y-auto p-2">
                     {emojiSearch ? (
-                      <>
-                        {filteredComposerCustomEmojis.length > 0 ? (
-                          <>
-                            <p className="mb-1 px-1 text-[10px] uppercase tracking-wide text-gray-500 font-bold">Custom</p>
-                            <div className="grid grid-cols-8 gap-1">
-                              {filteredComposerCustomEmojis.map((emoji) => (
-                                <button className="grid h-8 place-items-center rounded hover:bg-[#3a3d42]" key={emoji.id} onClick={() => addCustomEmojiToComposer(emoji.id)} title={`${emoji.name} from ${emoji.serverName}`} type="button">
-                                  {renderEmojiVisual(`:${emoji.id}:`, { id: emoji.id, name: emoji.name }, config.cdnUrl)}
-                                </button>
-                              ))}
-                            </div>
-                          </>
-                        ) : (
-                          <p className="text-xs text-gray-500 text-center py-4">No custom emojis match "{emojiSearch}"</p>
-                        )}
-                      </>
+                      filteredCE.length
+                        ? <div className="grid grid-cols-8 gap-1">{filteredCE.map((e) => <button key={e.id} className="grid h-8 place-items-center rounded hover:bg-[#3a3d42]" onClick={() => addCE(e.id)} title={`${e.name} · ${e.serverName}`}>{renderEmojiVis(`:${e.id}:`, { id: e.id, name: e.name }, config.cdnUrl)}</button>)}</div>
+                        : <p className="text-center py-4 text-xs text-gray-500">No match</p>
                     ) : (
                       <>
-                        <p className="mb-1 px-1 text-[10px] uppercase tracking-wide text-gray-500 font-bold sticky top-0 bg-[#232428]">Standard</p>
-                        <div className="grid grid-cols-8 gap-1 mb-2">
-                          {STANDARD_EMOJIS.map((emoji) => (
-                            <button className="rounded p-1 text-lg hover:bg-[#3a3d42]" key={emoji} onClick={() => addEmojiToComposer(emoji)} type="button">
-                              {renderTwemoji(emoji, 'w-6 h-6 inline-block')}
-                            </button>
-                          ))}
-                        </div>
-                        {allCustomEmojis.length > 0 ? (
-                          <>
-                            <p className="mb-1 px-1 text-[10px] uppercase tracking-wide text-gray-500 font-bold sticky top-0 bg-[#232428]">Space Emojis</p>
-                            <div className="grid grid-cols-8 gap-1">
-                              {allCustomEmojis.map((emoji) => (
-                                <button className="grid h-8 place-items-center rounded hover:bg-[#3a3d42]" key={emoji.id} onClick={() => addCustomEmojiToComposer(emoji.id)} title={`${emoji.name} from ${emoji.serverName}`} type="button">
-                                  {renderEmojiVisual(`:${emoji.id}:`, { id: emoji.id, name: emoji.name }, config.cdnUrl)}
-                                </button>
-                              ))}
-                            </div>
-                          </>
-                        ) : null}
+                        <p className="mb-1 px-1 text-[10px] font-bold uppercase tracking-wide text-gray-500 sticky top-0 bg-[#232428]">Standard</p>
+                        <div className="grid grid-cols-8 gap-1 mb-2">{STD_EMOJI.map((e) => <button key={e} className="rounded p-0.5 text-lg hover:bg-[#3a3d42]" onClick={() => addEmoji(e)}>{renderTwemoji(e, 'w-6 h-6 inline-block')}</button>)}</div>
+                        {allCE.length > 0 && <>
+                          <p className="mb-1 px-1 text-[10px] font-bold uppercase tracking-wide text-gray-500 sticky top-0 bg-[#232428]">Space Emojis</p>
+                          <div className="grid grid-cols-8 gap-1">{allCE.map((e) => <button key={e.id} className="grid h-8 place-items-center rounded hover:bg-[#3a3d42]" onClick={() => addCE(e.id)} title={`${e.name} · ${e.serverName}`}>{renderEmojiVis(`:${e.id}:`, { id: e.id, name: e.name }, config.cdnUrl)}</button>)}</div>
+                        </>}
                       </>
                     )}
                   </div>
                 </div>
-              ) : null}
+              )}
             </div>
 
             <textarea
               ref={composerRef}
               className="composer-textarea flex-1 bg-transparent px-2 py-1.5 text-sm text-gray-100 placeholder:text-gray-400 focus:outline-none resize-none"
               rows={1}
-              disabled={selectedChannelId === 'friends'}
-              onChange={(e) => setInputText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
-                if (e.key === 'Escape') { setReplyingTo(null); setInputText(''); }
-              }}
-              placeholder={selectedChannelId === 'friends' ? 'Select a text channel to chat.' : `Message #${currentChannelName}`}
+              disabled={selChannel === 'friends'}
               value={inputText}
+              onChange={(e) => {
+                setInputText(e.target.value);
+                sendTypingBegin();
+                clearTimeout(sendTypingTimRef.current);
+                sendTypingTimRef.current = setTimeout(sendTypingEnd, 4000);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); clearTimeout(sendTypingTimRef.current); sendMessage(); }
+                if (e.key === 'Escape') { setReplyingTo(null); setInputText(''); sendTypingEnd(); }
+              }}
+              placeholder={selChannel === 'friends' ? 'Select a channel to chat.' : `Message #${curChName}`}
             />
 
-            <button
-              className="rounded p-2 text-gray-300 hover:bg-[#4b4d55] hover:text-white transition-colors disabled:cursor-not-allowed disabled:opacity-60 mb-0.5"
-              disabled={isUploadingFiles || (!inputText.trim() && !pendingFiles.length)}
-              onClick={sendMessage}
-              type="button"
-            >
-              {isUploadingFiles ? <Loader className="animate-spin" size={16} /> : <Send size={16} />}
+            <button className="p-2 text-gray-300 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed mb-0.5 shrink-0"
+              disabled={isUploading || (!inputText.trim() && !pendingFiles.length) || selChannel === 'friends'}
+              onClick={() => { clearTimeout(sendTypingTimRef.current); sendMessage(); }}>
+              {isUploading ? <Loader className="animate-spin" size={16} /> : <Send size={16} />}
             </button>
           </div>
-          <p className="mt-1 text-right text-[10px] text-gray-500 pr-1">Shift+Enter for newline · Esc to cancel reply</p>
+          <p className="mt-1 text-right text-[10px] text-gray-500">Shift+Enter for newline · Esc cancel reply</p>
         </footer>
       </main>
 
-      {/* ── Members sidebar ── */}
-      <aside className="hidden w-60 flex-col border-l border-[#202225] bg-[#2b2d31] lg:flex shrink-0">
-        <div className="border-b border-[#202225] px-4 py-3 text-xs font-bold uppercase tracking-wide text-gray-400">
-          <div>Members — {allCurrentMembers.length}</div>
-          {isMembersLoading
-            ? <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[#242A35]"><div className="h-full w-1/3 animate-pulse rounded-full bg-[#8AB4F8]" /></div>
-            : null
-          }
+      {/* ════ MEMBERS SIDEBAR ════ */}
+      <aside className="hidden w-56 flex-col border-l border-[#202225] bg-[#2b2d31] lg:flex shrink-0">
+        <div className="border-b border-[#202225] px-4 py-3 shrink-0">
+          <div className="text-xs font-bold uppercase tracking-wide text-gray-400">Members — {allMembers.length}</div>
+          {isMembLoading && <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-[#242A35]"><div className="h-full w-1/3 animate-pulse rounded-full bg-[#8AB4F8]" /></div>}
         </div>
-        <div className="min-h-0 flex-1 relative">
-          {selectedServerId === '@me'
-            ? <div className="p-4 text-xs text-gray-400">Member list is available in spaces.</div>
-            : <VirtualList items={memberListItems} itemHeight={40} className="h-full w-full" renderItem={renderMemberItem} />
+        <div className="min-h-0 flex-1">
+          {selServer === '@me'
+            ? <p className="p-4 text-xs text-gray-400">Member list available in spaces.</p>
+            : <MemberVirtualList items={memberListItems} className="h-full w-full" renderItem={renderMemberItem} />
           }
         </div>
       </aside>
@@ -2237,9 +2007,5 @@ function AppShell() {
 }
 
 export default function App() {
-  return (
-    <AppErrorBoundary>
-      <AppShell />
-    </AppErrorBoundary>
-  );
+  return <AppErrorBoundary><AppShell /></AppErrorBoundary>;
 }
