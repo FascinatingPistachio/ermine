@@ -110,7 +110,27 @@ const getRuntimeConfig = () => {
 };
 const { apiUrl: DEF_API, wsUrl: DEF_WS, cdnUrl: DEF_CDN } = getRuntimeConfig();
 
-const inputBase = 'w-full rounded-md border border-[#242A35] bg-[#141821] px-3 py-2 text-sm text-[#E6EDF3] placeholder:text-[#8892A6] focus:border-[#8AB4F8] focus:outline-none focus:ring-1 focus:ring-[#8AB4F8]';
+// ─── Discord design tokens ────────────────────────────────────────────────────
+const C = {
+  bg1:       '#1e1f22',   // server rail
+  bg2:       '#2b2d31',   // sidebar
+  bg3:       '#313338',   // chat
+  bg4:       '#383a40',   // input
+  elevated:  '#292b2f',   // modals, embeds
+  hover:     '#35373c',
+  active:    '#404249',
+  border:    '#1e1f22',
+  brand:     '#5865f2',
+  brandHov:  '#4752c4',
+  text1:     '#f2f3f5',   // primary
+  text2:     '#b5bac1',   // secondary
+  text3:     '#80848e',   // muted
+  green:     '#23a55a',
+  yellow:    '#f0b232',
+  red:       '#f23f43',
+  blue:      '#4f7dff',
+};
+const inputBase = 'w-full rounded bg-[#1e1f22] border border-transparent px-3 py-2 text-sm text-[#f2f3f5] placeholder:text-[#80848e] focus:border-[#5865f2] focus:outline-none focus:ring-0 transition-colors';
 
 const TK  = 'ermine_session_token';
 const UK  = 'ermine_user_id';
@@ -162,7 +182,7 @@ const joinedAt  = (e) => e?.joined_at || e?.joinedAt || e?.created_at || e?.crea
 
 // ─── Avatar component ─────────────────────────────────────────────────────────
 const uidToHue = (id = '') => { let h = 0; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) & 0xffff; return h % 360; };
-const PRESENCE_COLOR = { Online: '#3ba55d', Busy: '#ed4245', Idle: '#f0b232', Focus: '#4f7dff' };
+const PRESENCE_COLOR = { Online: '#23a55a', Busy: '#f23f43', Idle: '#f0b232', Focus: '#4f7dff' };
 const getPresenceColor = (p) => PRESENCE_COLOR[p] ?? '#747f8d';
 
 const Avatar = ({ user, cdn, size = 'md', hover = false, always = false }) => {
@@ -351,8 +371,13 @@ const renderMd = (text, key, openLink) => {
 };
 const renderMdInline = (text, key, openLink) => {
   if (!text) return null;
-  return text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|__[^_]+__|~~[^~]+~~|\[[^\]]+\]\([^)]+\))/g).map((tok, i) => {
-    if (/^`[^`]+`$/.test(tok)) return <code key={`${key}-${i}`} className="rounded bg-[#232428] px-1 py-0.5 text-xs font-mono text-[#f2f3f5]">{tok.slice(1,-1)}</code>;
+  return text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|__[^_]+__|~~[^~]+~~|\|\|.+?\|\||\[[^\]]+\]\([^)]+\))/g).map((tok, i) => {
+    if (/^`[^`]+`$/.test(tok)) return <code key={`${key}-${i}`} className="rounded bg-[#1e1f22] px-1 py-0.5 text-xs font-mono text-[#f2f3f5]">{tok.slice(1,-1)}</code>;
+    // Spoiler: ||text||
+    if (/^\|\|.+\|\|$/.test(tok)) {
+      const SpoilerSpan = () => { const [rev, setRev] = React.useState(false); return <span className={`spoiler rounded px-0.5 ${rev ? 'revealed' : ''}`} onClick={() => setRev(true)}>{tok.slice(2,-2)}</span>; };
+      return <SpoilerSpan key={`${key}-${i}`} />;
+    }
     if (/^\*\*[^*]+\*\*$/.test(tok)) return <strong key={`${key}-${i}`}>{tok.slice(2,-2)}</strong>;
     if (/^\*[^*]+\*$/.test(tok))     return <em key={`${key}-${i}`}>{tok.slice(1,-1)}</em>;
     if (/^__[^_]+__$/.test(tok))     return <span key={`${key}-${i}`} className="underline">{tok.slice(2,-2)}</span>;
@@ -443,7 +468,7 @@ const UrlEmbed = memo(({ embed, cdn, openLink }) => {
   if (type === 'Website' || type === 'Text') {
     const imgSrc = image?.url || null;
     return (
-      <div className="mt-1.5 rounded-lg border-l-4 bg-[#1e2024] p-3 max-w-sm" style={{ borderColor: colour || '#3a3d42' }}>
+      <div className="mt-2 rounded rounded-l-none border-l-4 bg-[#2b2d31] p-3 max-w-sm" style={{ borderColor: colour || '#1e1f22' }}>
         {site_name && <p className="text-xs text-gray-400 mb-1">{site_name}</p>}
         {title && <a className="text-sm font-semibold text-[#8ea1ff] hover:underline block" href={url} onClick={(e) => { e.preventDefault(); openLink(url); }} rel="noreferrer" target="_blank">{title}</a>}
         {description && <p className="text-xs text-gray-300 mt-1 line-clamp-3">{description}</p>}
@@ -602,7 +627,7 @@ const Message = memo(({
 
   return (
     <article
-      className={`group relative flex gap-3 px-4 ${grouped ? 'py-0.5' : 'pt-2 pb-0.5'} transition-colors duration-75 hover:bg-[#2e3035] ${replyTarget === message._id ? 'bg-[#3a3f66]/20' : ''}`}
+      className={`group relative flex gap-3 px-4 ${grouped ? 'py-0.5' : 'pt-3 pb-0.5'} hover:bg-[#2e3035]/50 ${replyTarget === message._id ? 'bg-[#5865f2]/10' : ''}`}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       ref={(n) => regRef(message._id, n)}
@@ -618,7 +643,7 @@ const Message = memo(({
       </div>
       <div className="min-w-0 flex-1 py-1">
         {rid && (
-          <button className="mb-1 flex max-w-full items-center gap-1 text-xs text-gray-400 hover:text-gray-200 transition-colors" onClick={() => jumpTo(rid)} type="button">
+          <button className="mb-1 flex max-w-full items-center gap-1 text-[12px] text-[#80848e] hover:text-[#b5bac1] transition-colors" onClick={() => jumpTo(rid)} type="button">
             <Reply size={11} />
             <span className="truncate">{replyUser?.username || 'Unknown'}: {replyMsg?.content || 'Attachment/embed'}</span>
           </button>
@@ -626,10 +651,10 @@ const Message = memo(({
 
         {!grouped && (
           <div className="flex items-baseline gap-2 mb-0.5">
-            <button className="text-sm font-semibold hover:underline" onClick={() => onUser(displayUser, authorId)} style={{ color: displayColor || '#fff' }} type="button">{displayUser.username}</button>
+            <button className="text-[15px] font-semibold leading-none hover:underline" onClick={() => onUser(displayUser, authorId)} style={{ color: displayColor || '#f2f3f5' }} type="button">{displayUser.username}</button>
             {masq && <span className="rounded bg-[#f0b232]/20 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#f0b232]">BOT</span>}
             {mine && !masq && <span className="rounded bg-[#5865f2]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[#bdc3ff]">YOU</span>}
-            <time className="text-[11px] text-gray-500" title={ts}>{ts}</time>
+            <time className="text-[11px] text-[#80848e] font-medium" title={ts}>{ts}</time>
             {message.edited && <span className="text-[10px] text-gray-600">(edited)</span>}
           </div>
         )}
@@ -641,9 +666,12 @@ const Message = memo(({
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (editVal.trim() !== message.content) onEdit(message._id, editVal); setEditing(false); } if (e.key === 'Escape') setEditing(false); }} />
             <div className="text-[11px] text-gray-400 flex gap-2"><span className="flex-1">esc cancel · enter save</span><button onClick={() => setEditing(false)} className="text-[#ed4245] hover:underline">cancel</button><button onClick={() => { if (editVal.trim() !== message.content) onEdit(message._id, editVal); setEditing(false); }} className="text-[#5865f2] hover:underline">save</button></div>
           </div>
-        ) : message.content ? (
-          <p className="whitespace-pre-wrap break-words text-sm text-gray-200">{renderContent(message.content, users, channels, onUser, ceById, cdn, openLink)}</p>
-        ) : null}
+        ) : message.content ? (() => {
+          // Discord: message containing ONLY emoji(s) renders them large
+          const trimmed = message.content.trim();
+          const onlyEmoji = /^(\s*(?::[A-Z0-9]{26}:|[\uD800-\uDBFF][\uDC00-\uDFFF]|[^\S\r\n])+\s*)$/i.test(trimmed) && trimmed.length < 100;
+          return <p className={`whitespace-pre-wrap break-words ${onlyEmoji ? 'text-4xl leading-relaxed' : 'text-[15px] text-[#dcddde] leading-[1.375]'}`}>{renderContent(message.content, users, channels, onUser, ceById, cdn, openLink)}</p>;
+        })() : null}
 
         {/* API embeds */}
         {Array.isArray(message.embeds) && message.embeds.map((em, i) => <UrlEmbed key={i} embed={em} cdn={cdn} openLink={openLink} />)}
@@ -677,7 +705,7 @@ const Message = memo(({
             const reacted = ids.includes(me);
             const ce = resolveCE(emoji, ceById);
             return (
-              <button key={emoji} className={`reaction-btn rounded-full border px-2 py-0.5 text-xs flex items-center gap-1 ${reacted ? 'border-[#5865f2] bg-[#5865f2]/20 text-[#d7ddff]' : 'border-[#4c4f56] bg-[#2b2d31] text-gray-200 hover:bg-[#35373c]'}`}
+              <button key={emoji} className={`reaction-btn rounded-lg border h-7 px-2 text-xs flex items-center gap-1 ${reacted ? 'border-[#5865f2]/60 bg-[#5865f2]/15 text-[#c4c9ff]' : 'border-[#35373c] bg-[#2b2d31] text-[#b5bac1] hover:bg-[#35373c] hover:border-[#5865f2]/40'}`}
                 onClick={() => onReact(message, emoji, reacted)} title={ce?.name || emoji} type="button">
                 {renderEmojiVis(emoji, ce, cdn)} {ids.length}
               </button>
@@ -686,15 +714,16 @@ const Message = memo(({
         </div>
       </div>
 
-      {/* Hover action bar */}
-      <div className={`absolute right-4 -top-3 z-10 transition-opacity duration-100 ${hovered || pickerOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-        <div className="flex items-center bg-[#313338] border border-[#2f3237] rounded-md shadow-md">
-          <button className="p-1.5 text-gray-400 hover:text-gray-200 hover:bg-[#404249] rounded-l-md" onClick={() => onReply(message)} title="Reply"><Reply size={14} /></button>
-          <button className="p-1.5 text-gray-400 hover:text-gray-200 hover:bg-[#404249]" onClick={() => setPickerOpen((p) => !p)} title="React"><span className="text-sm leading-none">😊</span></button>
+      {/* Hover action bar — Discord-style floating toolbar */}
+      <div className={`absolute right-4 -top-4 z-10 transition-all duration-75 ${hovered || pickerOpen ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1 pointer-events-none'}`}>
+        <div className="flex items-center bg-[#2b2d31] border border-[#1e1f22] rounded-lg shadow-xl divide-x divide-[#1e1f22]">
+          <button className="px-2 py-1.5 text-[#b5bac1] hover:text-[#f2f3f5] hover:bg-[#35373c] rounded-l-lg transition-colors flex items-center gap-1" onClick={() => onReply(message)} title="Reply"><Reply size={14} /><span className="text-[11px] hidden sm:inline">Reply</span></button>
+          <button className="px-2 py-1.5 text-[#b5bac1] hover:text-[#f2f3f5] hover:bg-[#35373c] transition-colors" onClick={() => setPickerOpen((p) => !p)} title="Add Reaction"><span className="text-base leading-none">😊</span></button>
           {mine && <>
-            <button className="p-1.5 text-gray-400 hover:text-gray-200 hover:bg-[#404249]" onClick={() => { setEditVal(message.content || ''); setEditing(true); setPickerOpen(false); }} title="Edit"><Edit2 size={14} /></button>
-            <button className="p-1.5 text-red-400 hover:text-red-200 hover:bg-[#404249] rounded-r-md" onClick={() => onDelete(message)} title="Delete"><Trash2 size={14} /></button>
+            <button className="px-2 py-1.5 text-[#b5bac1] hover:text-[#f2f3f5] hover:bg-[#35373c] transition-colors" onClick={() => { setEditVal(message.content || ''); setEditing(true); setPickerOpen(false); }} title="Edit Message"><Edit2 size={14} /></button>
+            <button className="px-2 py-1.5 text-[#b5bac1] hover:text-[#f23f43] hover:bg-[#35373c] rounded-r-lg transition-colors" onClick={() => onDelete(message)} title="Delete Message"><Trash2 size={14} /></button>
           </>}
+          {!mine && <button className="px-2 py-1.5 text-[#b5bac1] hover:text-[#f2f3f5] hover:bg-[#35373c] rounded-r-lg transition-colors" title="More"><Info size={14} /></button>}
         </div>
       </div>
 
@@ -1041,7 +1070,7 @@ function AppShell() {
 
   const renderMemberItem = useCallback((item) => {
     if (item.type === 'header') return (
-      <div className="flex items-center px-4 text-xs font-bold uppercase tracking-wide text-gray-400 h-full">
+      <div className="flex items-center px-3 text-[11px] font-bold uppercase tracking-widest text-[#80848e] h-full">
         {item.name} — {item.count}
       </div>
     );
@@ -2052,36 +2081,44 @@ function AppShell() {
       )}
 
       {/* ════ SERVER RAIL ════ */}
-      <aside className="flex w-[72px] flex-col items-center gap-2 overflow-y-auto bg-[#111214] py-3 shrink-0">
-        <button className={`grid h-12 w-12 place-items-center transition-all duration-150 ${selServer === '@me' ? 'rounded-2xl bg-[#5865f2]' : 'rounded-full bg-[#313338] hover:rounded-2xl hover:bg-[#5865f2]'}`} onClick={() => selectServer('@me')} title="Direct messages"><MessageSquare size={20} /></button>
-        <div className="h-px w-8 bg-[#202225]" />
+      <aside className="flex w-[72px] flex-col items-center gap-2 overflow-y-auto bg-[#1e1f22] py-3 shrink-0">
+        {/* Home button */}
+        <div className={`srv-wrap relative flex items-center ${selServer === '@me' ? 'active' : ''}`} style={{width:72}}>
+          <span className="srv-pill" />
+          <button
+            className={`srv-icon mx-auto grid h-12 w-12 place-items-center ${selServer === '@me' ? 'bg-[#5865f2] text-white' : 'bg-[#313338] text-[#c3c4ca] hover:text-white'}`}
+            onClick={() => selectServer('@me')} title="Direct Messages"
+          ><MessageSquare size={20} /></button>
+        </div>
+        <div className="w-8 h-px bg-[#35373c] mx-auto" />
         {serverList.map((s) => {
           const ic = iconUrl(s, config.cdnUrl); const active = selServer === s._id;
+          const hasUnread = !active && Object.values(channels).some((c) => c.server === s._id && unreadChannels.has(c._id));
           return (
-            <div key={s._id} className="relative">
-              <button className={`grid h-12 w-12 place-items-center overflow-hidden transition-all duration-150 ${active ? 'rounded-2xl bg-[#5865f2]' : 'rounded-full bg-[#313338] hover:rounded-2xl hover:bg-[#5865f2]'}`} onClick={() => selectServer(s._id)} title={s.name}>
-                {ic ? <img alt={s.name} className="h-full w-full object-contain p-1" src={ic} /> : <span className="text-sm font-bold">{s.name.slice(0,2).toUpperCase()}</span>}
+            <div key={s._id} className={`srv-wrap relative flex items-center ${active ? 'active' : ''}`} style={{width:72}} title={s.name}>
+              <span className="srv-pill" style={{height: active ? 40 : hasUnread ? 8 : 0}} />
+              <button className={`srv-icon mx-auto grid h-12 w-12 place-items-center overflow-hidden ${active ? 'bg-[#5865f2]' : 'bg-[#313338]'} text-[#c3c4ca] hover:text-white`} onClick={() => selectServer(s._id)}>
+                {ic
+                  ? <img alt={s.name} className="h-full w-full object-cover" src={ic} onError={(e) => { e.currentTarget.style.display='none'; }}/>
+                  : <span className="text-sm font-bold select-none">{s.name.slice(0,2).toUpperCase()}</span>
+                }
               </button>
-              {/* Unread indicator */}
-              {Object.values(channels).some((c) => c.server === s._id && unreadChannels.has(c._id)) && !active && (
-                <span className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full bg-white unread-dot pointer-events-none" />
-              )}
             </div>
           );
         })}
-        <button className="grid h-12 w-12 place-items-center rounded-full bg-[#313338] text-[#3ba55d] transition-all duration-150 hover:rounded-2xl hover:bg-[#3ba55d] hover:text-white" onClick={() => setActiveModal('create-server')} title="Create a space"><Plus size={20} /></button>
-        <button className="grid h-12 w-12 place-items-center rounded-full bg-[#313338] text-blue-400 transition-all duration-150 hover:rounded-2xl hover:bg-blue-600 hover:text-white" onClick={() => setActiveModal('join-server')} title="Join a space"><Link size={18} /></button>
+        <button className="srv-icon grid h-12 w-12 place-items-center bg-[#313338] text-[#23a55a] hover:bg-[#23a55a] hover:text-white transition-colors mx-auto" onClick={() => setActiveModal('create-server')} title="Add a Server"><Plus size={20} /></button>
+        <button className="srv-icon grid h-12 w-12 place-items-center bg-[#313338] text-[#5865f2] hover:bg-[#5865f2] hover:text-white transition-colors mx-auto" onClick={() => setActiveModal('join-server')} title="Join with Invite"><Link size={18} /></button>
       </aside>
 
       {/* ════ CHANNEL SIDEBAR ════ */}
       <aside className={`${showMobileSide ? 'flex' : 'hidden'} md:flex w-60 flex-col bg-[#2b2d31] shrink-0 z-30 md:z-auto absolute md:relative h-full`}>
-        {/* Server header */}
-        <div className="border-b border-[#202225] px-4 py-3 flex justify-between items-center shrink-0">
-          <div className="truncate text-sm font-bold text-white">{selServer === '@me' ? 'Direct Messages' : selServerObj?.name || 'Space'}</div>
+        {/* Server header — Discord-style with shadow */}
+        <div className="px-4 py-3 flex justify-between items-center shrink-0 shadow-md border-b border-black/30 bg-[#2b2d31]">
+          <div className="truncate text-sm font-bold text-[#f2f3f5]">{selServer === '@me' ? 'Direct Messages' : selServerObj?.name || 'Space'}</div>
           <div className="flex items-center gap-1">
             {isOwner && selServer !== '@me' && <>
-              <button onClick={() => setActiveModal('create-invite')} className="text-gray-400 hover:text-white transition-colors p-0.5" title="Create invite"><Link size={14} /></button>
-              <button onClick={() => { setEditServerName(selServerObj.name); setActiveModal('server-settings'); }} className="text-gray-400 hover:text-white transition-colors p-0.5" title="Space Settings"><Settings size={14} /></button>
+              <button onClick={() => setActiveModal('create-invite')} className="text-[#80848e] hover:text-[#b5bac1] transition-colors p-1 rounded hover:bg-[#35373c]" title="Create invite"><Link size={14} /></button>
+              <button onClick={() => { setEditServerName(selServerObj.name); setActiveModal('server-settings'); }} className="text-[#80848e] hover:text-[#b5bac1] transition-colors p-1 rounded hover:bg-[#35373c]" title="Server Settings"><Settings size={14} /></button>
             </>}
           </div>
         </div>
@@ -2108,17 +2145,15 @@ function AppShell() {
                 const rid   = ch.channel_type === 'DirectMessage' ? (ch.recipients || []).find((id) => id !== auth.userId) : null;
                 const unread = unreadChannels.has(ch._id);
                 return (
-                  <button key={ch._id} className={`mb-0.5 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors ${selChannel === ch._id ? 'bg-[#404249] text-white' : `text-gray-400 hover:bg-[#35373c] hover:text-white ${unread ? 'text-white' : ''}`}`} onClick={() => selectChannel(ch._id)}>
+                  <button key={ch._id} className={`relative mb-0.5 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors ch-item ${selChannel === ch._id ? 'active' : unread ? 'unread' : ''}`} onClick={() => selectChannel(ch._id)}>
                     {rid ? (
                       <div className="relative shrink-0">
                         <Avatar user={users[rid]} cdn={config.cdnUrl} size="sm" />
-                        {users[rid]?.status?.presence && users[rid]?.status?.presence !== 'Invisible' && (
-                          <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border-2 border-[#2b2d31]" style={{ background: getPresenceColor(users[rid].status.presence) }} />
-                        )}
+                        <span className="absolute -bottom-px -right-px w-3 h-3 rounded-full border-2 border-[#2b2d31]" style={{ background: users[rid]?.status?.presence ? getPresenceColor(users[rid].status.presence) : '#747f8d' }} />
                       </div>
-                    ) : <span className="text-gray-400 shrink-0">{icon}</span>}
-                    <span className="truncate flex-1">{label}</span>
-                    {unread && <span className="unread-dot w-2 h-2 rounded-full bg-white shrink-0" />}
+                    ) : <span className="text-[#80848e] shrink-0">{icon}</span>}
+                    <span className="truncate flex-1 text-sm">{label}</span>
+                    {unread && <span className="w-2 h-2 rounded-full bg-[#f2f3f5] shrink-0" />}
                   </button>
                 );
               })}
@@ -2131,44 +2166,42 @@ function AppShell() {
               if (item.type === 'category') {
                 const collapsed = collapsedCats[item.id];
                 return (
-                  <button key={item.id} className="flex w-full items-center gap-1 px-1 py-1 text-left" onClick={() => setCollapsedCats((p) => ({ ...p, [item.id]: !p[item.id] }))}>
-                    {collapsed ? <ChevronRight size={12} className="text-gray-500 shrink-0" /> : <ChevronDown size={12} className="text-gray-500 shrink-0" />}
-                    <span className="text-xs font-bold uppercase tracking-wide text-gray-400 truncate">{item.title}</span>
+                  <button key={item.id} className="flex w-full items-center gap-1 px-2 py-1.5 mt-3 text-left group" onClick={() => setCollapsedCats((p) => ({ ...p, [item.id]: !p[item.id] }))}>
+                    {collapsed ? <ChevronRight size={12} className="text-[#80848e] shrink-0 group-hover:text-[#b5bac1]" /> : <ChevronDown size={12} className="text-[#80848e] shrink-0 group-hover:text-[#b5bac1]" />}
+                    <span className="text-[11px] font-bold uppercase tracking-widest text-[#80848e] truncate group-hover:text-[#b5bac1]">{item.title}</span>
                   </button>
                 );
               }
               // type === 'channel'
               const ch = item.channel; const isVoice = ch.channel_type === 'VoiceChannel'; const unread = unreadChannels.has(ch._id);
               return (
-                <button key={ch._id} className={`mb-0.5 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors ${isVoice ? 'opacity-40 cursor-not-allowed' : selChannel === ch._id ? 'bg-[#404249] text-white' : `text-gray-400 hover:bg-[#35373c] hover:text-white ${unread ? 'text-white font-semibold' : ''}`}`}
+                <button key={ch._id}
+                  className={`relative mb-px flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left ch-item transition-none ${isVoice ? 'opacity-40 cursor-not-allowed' : selChannel === ch._id ? 'active' : unread ? 'unread' : ''}`}
                   onClick={() => !isVoice && selectChannel(ch._id)} disabled={isVoice} title={ch.name}>
-                  <span className={isVoice ? 'text-gray-600' : 'text-gray-400'}>{chIcon(ch)}</span>
-                  <span className="truncate flex-1">{ch.name || 'channel'}</span>
-                  {unread && <span className="unread-dot w-2 h-2 rounded-full bg-white shrink-0" />}
-                  {ch.nsfw && <span className="text-[9px] text-red-400 font-bold">NSFW</span>}
+                  <span className="shrink-0 w-4 h-4 flex items-center justify-center text-[#80848e]">{chIcon(ch)}</span>
+                  <span className="truncate flex-1 text-sm">{ch.name || 'channel'}</span>
+                  {ch.nsfw && <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-[#f23f43]/20 text-[#f23f43]">NSFW</span>}
                 </button>
               );
             })
           )}
         </div>
 
-        {/* Account footer */}
-        <div className="border-t border-[#202225] p-2 shrink-0">
-          <div className="flex items-center justify-between rounded bg-[#232428] p-2" onMouseEnter={() => setIsAccHovered(true)} onMouseLeave={() => setIsAccHovered(false)}>
-            <button className="flex min-w-0 items-center gap-2 rounded p-1 text-left hover:bg-[#2d3036] flex-1 transition-colors" onClick={openStatusEditor} type="button">
-              <div className="relative shrink-0">
-                <Avatar user={users[auth.userId]} cdn={config.cdnUrl} size="sm" always={isAccHovered} />
-                <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-[#232428]" style={{ background: getPresenceColor(users[auth.userId]?.status?.presence) }} />
-              </div>
-              <div className="min-w-0">
-                <div className="truncate text-xs font-semibold text-white">{users[auth.userId]?.username || 'Connected'}</div>
-                <div className="truncate text-[10px] text-gray-400">{users[auth.userId]?.status?.text || status}</div>
-              </div>
-            </button>
-            <div className="flex items-center gap-0.5 shrink-0">
-              <button className="rounded p-1 text-gray-400 hover:text-white transition-colors" onClick={() => setActiveModal('user-settings')} title="Preferences"><Settings size={13} /></button>
-              <button className="rounded p-1 text-gray-400 hover:text-white transition-colors" onClick={logout} title="Logout"><LogOut size={13} /></button>
+        {/* Account footer — Discord-style */}
+        <div className="h-[52px] bg-[#232428] px-2 flex items-center gap-2 shrink-0 border-t border-black/30">
+          <button className="flex min-w-0 items-center gap-2 rounded p-1.5 text-left hover:bg-[#35373c] flex-1 transition-colors min-h-0" onClick={openStatusEditor} type="button" onMouseEnter={() => setIsAccHovered(true)} onMouseLeave={() => setIsAccHovered(false)}>
+            <div className="relative shrink-0">
+              <Avatar user={users[auth.userId]} cdn={config.cdnUrl} size="sm" always={isAccHovered} />
+              <span className="absolute -bottom-px -right-px w-3 h-3 rounded-full border-2 border-[#232428]" style={{ background: getPresenceColor(users[auth.userId]?.status?.presence) }} />
             </div>
+            <div className="min-w-0">
+              <div className="truncate text-[13px] font-semibold text-[#f2f3f5] leading-none mb-0.5">{users[auth.userId]?.username || '…'}</div>
+              <div className="truncate text-[11px] text-[#80848e] leading-none">{users[auth.userId]?.status?.text || users[auth.userId]?.status?.presence || 'Online'}</div>
+            </div>
+          </button>
+          <div className="flex items-center gap-0.5 shrink-0">
+            <button className="p-1.5 rounded text-[#b5bac1] hover:text-[#f2f3f5] hover:bg-[#35373c] transition-colors" onClick={() => setActiveModal('user-settings')} title="User Settings"><Settings size={16} /></button>
+            <button className="p-1.5 rounded text-[#b5bac1] hover:text-[#f23f43] hover:bg-[#35373c] transition-colors" onClick={logout} title="Log Out"><LogOut size={16} /></button>
           </div>
         </div>
       </aside>
@@ -2178,28 +2211,28 @@ function AppShell() {
 
       {/* ════ MAIN ════ */}
       <main className="relative flex min-w-0 flex-1 flex-col bg-[#313338]">
-        {/* Header */}
-        <header className="flex items-center justify-between border-b border-[#202225] px-4 py-2.5 shrink-0">
+        {/* Header — Discord-style */}
+        <header className="flex h-12 items-center justify-between border-b border-black/30 px-4 bg-[#313338] shadow-sm shrink-0 z-10">
           <div className="flex items-center gap-2 min-w-0">
-            <button className="md:hidden text-gray-400 hover:text-white transition-colors mr-1" onClick={() => setShowMobileSide((p) => !p)}><Menu size={20} /></button>
-            <span className="text-gray-400 shrink-0">{chIcon(channels[selChannel])}</span>
-            <span className="text-sm font-semibold text-white truncate">{curChName}</span>
-            {curChTopic && <span className="hidden lg:block text-xs text-gray-400 border-l border-[#3f4249] pl-2 ml-1 truncate max-w-xs">{curChTopic}</span>}
+            <button className="md:hidden text-[#80848e] hover:text-[#b5bac1] transition-colors mr-1" onClick={() => setShowMobileSide((p) => !p)}><Menu size={20} /></button>
+            <span className="text-[#80848e] shrink-0">{chIcon(channels[selChannel])}</span>
+            <span className="text-base font-bold text-[#f2f3f5] truncate">{curChName}</span>
+            {curChTopic && <span className="hidden lg:block text-[13px] text-[#80848e] border-l border-[#35373c] pl-3 ml-1 truncate max-w-xs">{curChTopic}</span>}
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1 shrink-0">
             {selChannel !== 'friends' && (
               <>
-                <button className="text-gray-400 hover:text-white transition-colors p-1" onClick={() => { fetchPins(selChannel); setActiveModal('pinned'); }} title="Pinned messages"><Pin size={16} /></button>
-                {isOwner && selServer !== '@me' && selChannel !== 'friends' && (
-                  <button className="text-gray-400 hover:text-white transition-colors p-1" onClick={() => setActiveModal('create-invite')} title="Create invite"><Link size={16} /></button>
+                <button className="p-1.5 rounded text-[#b5bac1] hover:text-[#f2f3f5] hover:bg-[#35373c] transition-colors" onClick={() => { fetchPins(selChannel); setActiveModal('pinned'); }} title="Pinned Messages"><Pin size={18} /></button>
+                {isOwner && selServer !== '@me' && (
+                  <button className="p-1.5 rounded text-[#b5bac1] hover:text-[#f2f3f5] hover:bg-[#35373c] transition-colors" onClick={() => setActiveModal('create-invite')} title="Create Invite"><Link size={18} /></button>
                 )}
               </>
             )}
-            <StatusBadge status={status} />
+            <div className="ml-2"><StatusBadge status={status} /></div>
           </div>
         </header>
 
-        {voiceNotice && <div className="mx-4 mt-2 rounded-md border border-[#665200] bg-[#5c4a00]/25 px-3 py-2 text-xs text-yellow-200">{voiceNotice}</div>}
+        {voiceNotice && <div className="mx-4 mt-2 flex items-center gap-2 rounded bg-[#f0b232]/10 border border-[#f0b232]/20 px-3 py-2 text-[13px] text-[#f0b232]"><Info size={14} className="shrink-0" />{voiceNotice}</div>}
 
         {/* Message area */}
         <section className="flex-1 overflow-y-auto py-2" ref={scrollRef}>
@@ -2243,10 +2276,10 @@ function AppShell() {
               ))}
             </div>
           ) : curMsgs.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-center p-8 text-gray-400">
-              <Hash size={40} className="mb-3 opacity-25" />
-              <p className="text-sm font-semibold">No messages yet</p>
-              <p className="text-xs mt-1 opacity-60">Be the first to say something!</p>
+            <div className="flex flex-col items-center justify-center h-full text-center p-8">
+              <div className="mb-4 p-4 rounded-full bg-[#2b2d31]"><Hash size={32} className="text-[#80848e]" /></div>
+              <p className="text-2xl font-bold text-[#f2f3f5] mb-1">Welcome to #{curChName}!</p>
+              <p className="text-[#80848e] text-sm">This is the start of #{curChName}.</p>
             </div>
           ) : (
             curMsgs.map((msg, idx) => {
@@ -2309,15 +2342,15 @@ function AppShell() {
             </div>
           )}
 
-          <div className="flex items-end gap-2 rounded-lg bg-[#383a40] px-2 py-2"
+          <div className="flex items-end gap-1 rounded-lg bg-[#383a40] px-2 py-2"
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => { e.preventDefault(); const f = Array.from(e.dataTransfer?.files || []); if (f.length) setPendingFiles((p) => [...p, ...f]); }}>
-            <button className="p-2 text-gray-300 hover:text-white transition-colors mb-0.5 shrink-0" disabled={selChannel === 'friends' || isUploading} onClick={() => fileInputRef.current?.click()} title="Attach file"><Paperclip size={16} /></button>
+            <button className="p-2 shrink-0 text-[#80848e] hover:text-[#b5bac1] transition-colors disabled:opacity-30" disabled={selChannel === 'friends' || isUploading} onClick={() => fileInputRef.current?.click()} title="Upload a File"><Paperclip size={20} /></button>
             <input className="hidden" multiple onChange={onFilePick} ref={fileInputRef} type="file" />
 
             <div className="relative shrink-0">
-              <button className="p-2 text-gray-300 hover:text-white transition-colors mb-0.5" disabled={selChannel === 'friends'} onClick={() => setShowEmojiPicker((p) => !p)}>
-                <span className="text-base leading-none select-none">😊</span>
+              <button className="p-2 text-[#80848e] hover:text-[#b5bac1] transition-colors disabled:opacity-30" disabled={selChannel === 'friends'} onClick={() => setShowEmojiPicker((p) => !p)}>
+                <span className="text-xl leading-none select-none">😊</span>
               </button>
               {showEmojiPicker && selChannel !== 'friends' && (
                 <div ref={pickerRef} className="absolute bottom-12 left-0 z-20 w-72 rounded-lg border border-[#4c4f56] bg-[#232428] shadow-2xl max-h-72 overflow-hidden flex flex-col">
@@ -2346,7 +2379,7 @@ function AppShell() {
 
             <textarea
               ref={composerRef}
-              className="composer-textarea flex-1 bg-transparent px-2 py-1.5 text-sm text-gray-100 placeholder:text-gray-400 focus:outline-none resize-none"
+              className="composer-textarea flex-1 bg-transparent px-2 py-1.5 text-[15px] text-[#dcddde] placeholder:text-[#4f5660] focus:outline-none resize-none leading-[1.375]"
               rows={1}
               disabled={selChannel === 'friends'}
               value={inputText}
@@ -2364,21 +2397,20 @@ function AppShell() {
               placeholder={selChannel === 'friends' ? 'Select a channel to chat.' : `Message #${curChName}`}
             />
 
-            <button className="p-2 text-gray-300 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed mb-0.5 shrink-0"
+            <button className="p-2 shrink-0 text-[#80848e] hover:text-[#b5bac1] transition-colors disabled:opacity-30"
               disabled={isUploading || (!inputText.trim() && !pendingFiles.length) || selChannel === 'friends'}
               onClick={() => { clearTimeout(sendTypingTimRef.current); sendMessage(); }}>
-              {isUploading ? <Loader className="animate-spin" size={16} /> : <Send size={16} />}
+              {isUploading ? <Loader className="animate-spin text-[#5865f2]" size={20} /> : <Send size={20} />}
             </button>
           </div>
-          <p className="mt-1 text-right text-[10px] text-gray-500">Shift+Enter for newline · Esc cancel reply</p>
+          <p className="mt-1 px-1 text-[11px] text-[#4f5660]"><strong className="text-[#80848e]">Enter</strong> to send · <strong className="text-[#80848e]">Shift+Enter</strong> for newline</p>
         </footer>
       </main>
 
       {/* ════ MEMBERS SIDEBAR ════ */}
-      <aside className="hidden w-56 flex-col border-l border-[#202225] bg-[#2b2d31] lg:flex shrink-0">
-        <div className="border-b border-[#202225] px-4 py-3 shrink-0">
-          <div className="text-xs font-bold uppercase tracking-wide text-gray-400">Members — {allMembers.length}</div>
-          {isMembLoading && <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-[#242A35]"><div className="h-full w-1/3 animate-pulse rounded-full bg-[#8AB4F8]" /></div>}
+      <aside className="hidden w-[240px] flex-col bg-[#2b2d31] lg:flex shrink-0">
+        <div className="px-3 pt-4 pb-0 shrink-0">
+          {isMembLoading && <div className="mb-2 h-0.5 w-full overflow-hidden rounded-full bg-[#1e1f22]"><div className="h-full w-1/2 animate-pulse rounded-full bg-[#5865f2]" /></div>}
         </div>
         <div className="min-h-0 flex-1">
           {selServer === '@me'
