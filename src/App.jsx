@@ -1,14 +1,60 @@
 import React, {
-  useEffect, useMemo, useRef, useState,
+  useEffect, useLayoutEffect, useMemo, useRef, useState,
   useCallback, memo, Component,
 } from 'react';
 import {
-  AlertCircle, Bell, BellOff, BookOpen, ChevronDown, ChevronRight,
+  AlertCircle, BookOpen, ChevronDown, ChevronRight,
   Circle, EyeOff, Hash, Link, LogOut, Menu, MessageSquare, Moon,
   MinusCircle, Plus, Paperclip, Pin, Reply, Send, Settings,
-  ShieldCheck, Smile, User, Users, UserPlus, UserCheck, UserX,
-  X, Trash2, Edit2, Save, Search, Loader, Copy, Check,
+  ShieldCheck, Users, UserPlus, UserX,
+  X, Trash2, Edit2, Save, Search, Loader, Copy, Check, Info,
 } from 'lucide-react';
+
+// ─── GLOBAL STYLES ────────────────────────────────────────────────────────────
+const ERMINE_CSS = `
+@keyframes ermineModalIn {
+  from { opacity:0; transform:scale(.96) translateY(-6px); }
+  to   { opacity:1; transform:scale(1)   translateY(0); }
+}
+@keyframes ermineToastIn {
+  from { opacity:0; transform:translateX(14px); }
+  to   { opacity:1; transform:translateX(0); }
+}
+@keyframes ermineHighlight {
+  0%,100% { background-color:transparent; }
+  25%,75% { background-color:rgba(88,101,242,.2); }
+}
+@keyframes ermineTypingBounce {
+  0%,60%,100% { transform:translateY(0); }
+  30%         { transform:translateY(-5px); }
+}
+::-webkit-scrollbar            { width:6px; height:6px; }
+::-webkit-scrollbar-track      { background:transparent; }
+::-webkit-scrollbar-thumb      { background:#4a4d55; border-radius:3px; }
+::-webkit-scrollbar-thumb:hover{ background:#5c606a; }
+.msg-highlight  { animation:ermineHighlight 1.4s ease; }
+.typing-dot     { animation:ermineTypingBounce 1.2s infinite ease-in-out; }
+.reaction-btn   { transition:transform .12s ease, background-color .12s ease; }
+.reaction-btn:hover { transform:scale(1.14); }
+.composer-textarea {
+  max-height:180px; overflow-y:auto;
+  scrollbar-width:thin; scrollbar-color:#4a4d55 transparent;
+  line-height:1.5; word-break:break-word;
+}
+.unread-dot { box-shadow:0 0 0 2px #2b2d31; }
+\`;
+
+const StyleInjector = memo(() => {
+  useLayoutEffect(() => {
+    if (document.getElementById('ermine-css')) return;
+    const el = document.createElement('style');
+    el.id = 'ermine-css'; el.textContent = ERMINE_CSS;
+    document.head.appendChild(el);
+    return () => el.remove();
+  }, []);
+  return null;
+});
+StyleInjector.displayName = 'StyleInjector';
 
 // ─── ULID ─────────────────────────────────────────────────────────────────────
 const ENCODING = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
@@ -71,8 +117,9 @@ const UK  = 'ermine_user_id';
 const AK  = 'ermine_api_url';
 
 const getCookie = (n) => { if (typeof document === 'undefined') return null; const v = document.cookie.split('; ').find((e) => e.startsWith(`${n}=`)); return v ? decodeURIComponent(v.slice(n.length + 1)) : null; };
-const setCookie = (n, v, a = 2592000) => { if (typeof document !== 'undefined') document.cookie = `${n}=${encodeURIComponent(v)}; Max-Age=${a}; Path=/; SameSite=Lax; Secure`; };
-const clearCookie = (n) => { if (typeof document !== 'undefined') document.cookie = `${n}=; Max-Age=0; Path=/; SameSite=Lax; Secure`; };
+const IS_SECURE = typeof window !== 'undefined' && window.location.protocol === 'https:';
+const setCookie = (n, v, a = 2592000) => { if (typeof document !== 'undefined') document.cookie = `${n}=${encodeURIComponent(v)}; Max-Age=${a}; Path=/; SameSite=Lax${IS_SECURE ? '; Secure' : ''}`; };
+const clearCookie = (n) => { if (typeof document !== 'undefined') document.cookie = `${n}=; Max-Age=0; Path=/; SameSite=Lax${IS_SECURE ? '; Secure' : ''}`; };
 
 // ─── Status options ───────────────────────────────────────────────────────────
 const STATUS_OPTIONS = [
@@ -114,36 +161,43 @@ const bannerUrl = (u, cdn) => { const b = u?.profile?.background || u?.banner; c
 const joinedAt  = (e) => e?.joined_at || e?.joinedAt || e?.created_at || e?.createdAt || null;
 
 // ─── Avatar component ─────────────────────────────────────────────────────────
+const uidToHue = (id = '') => { let h = 0; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) & 0xffff; return h % 360; };
+const PRESENCE_COLOR = { Online: '#3ba55d', Busy: '#ed4245', Idle: '#f0b232', Focus: '#4f7dff' };
+const getPresenceColor = (p) => PRESENCE_COLOR[p] ?? '#747f8d';
+
 const Avatar = ({ user, cdn, size = 'md', hover = false, always = false }) => {
   const sz = { sm: 'h-8 w-8 text-xs', md: 'h-10 w-10 text-sm', lg: 'h-12 w-12 text-base' }[size];
   const init = (user?.username || '?').slice(0, 2).toUpperCase();
+  const hue = uidToHue(user?._id ?? '');
   const [h, setH] = useState(false);
   const [err, setErr] = useState(false);
   useEffect(() => { setErr(false); }, [user?.avatar?._id]);
   const anim = (always || (hover && h)) && !isLowSpec && !err;
-  const src = user?.avatar?._id
-    ? `${cdn}/avatars/${user.avatar._id}${anim ? '/original' : ''}`
-    : null;
+  const src = user?.avatar?._id ? `${cdn}/avatars/${user.avatar._id}/original` : null;
   return (
-    <div className={`grid shrink-0 place-items-center overflow-hidden rounded-full bg-[#313338] font-semibold text-gray-200 ${sz}`}
+    <div className={`grid shrink-0 place-items-center overflow-hidden rounded-full font-semibold text-white ${sz}`}
+      style={{ background: src && !err ? 'transparent' : `hsl(${hue} 42% 28%)` }}
       onMouseEnter={() => setH(true)} onMouseLeave={() => setH(false)}>
-      {src ? <img alt={user?.username || ''} className="block h-full w-full object-cover" src={src} onError={() => { if (anim) setErr(true); }} /> : init}
+      {src && !err
+        ? <img alt={user?.username || ''} className="block h-full w-full object-cover" src={src} onError={() => setErr(true)} />
+        : <span className="select-none">{init}</span>
+      }
     </div>
   );
 };
 
 // ─── Error boundary ───────────────────────────────────────────────────────────
 class AppErrorBoundary extends Component {
-  constructor(p) { super(p); this.state = { err: false }; }
-  static getDerivedStateFromError() { return { err: true }; }
+  constructor(p) { super(p); this.state = { err: false, msg: '' }; }
+  static getDerivedStateFromError(e) { return { err: true, msg: e?.message ?? 'Unknown error' }; }
   componentDidCatch(e) { console.error('Ermine crash:', e); }
   render() {
     if (!this.state.err) return this.props.children;
     return (
       <div className="grid min-h-screen place-items-center bg-[#0F1115] p-6 text-[#E6EDF3]">
         <div className="w-full max-w-lg rounded-2xl border border-[#242A35] bg-[#171A21] p-8 text-center shadow-2xl">
-          <h1 className="text-2xl font-bold text-white">Connection interrupted.</h1>
-          <p className="mt-2 text-sm text-[#A6B0C3]">A reload is required to recover.</p>
+          <AlertCircle size={36} className="mx-auto mb-4 text-red-400" /><h1 className="text-2xl font-bold text-white">Something went wrong</h1>
+          <p className="mt-2 text-sm text-[#A6B0C3] font-mono break-all">{this.state.msg}</p>
           <button className="mt-6 rounded-md bg-[#8AB4F8] px-4 py-2 text-sm font-semibold text-[#0F1115] hover:bg-[#6FA6E8]" onClick={() => window.location.reload()}>Reload Ermine</button>
         </div>
       </div>
@@ -152,18 +206,29 @@ class AppErrorBoundary extends Component {
 }
 
 // ─── Modal ────────────────────────────────────────────────────────────────────
-const Modal = ({ title, onClose, children, wide = false }) => (
-  <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm overflow-y-auto"
-    onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}>
-    <div className={`w-full ${wide ? 'max-w-2xl' : 'max-w-lg'} m-auto rounded-xl border border-[#242A35] bg-[#171A21] shadow-2xl flex max-h-[90vh] flex-col animate-[ermineModalIn_140ms_ease-out]`}>
-      <div className="flex shrink-0 items-center justify-between border-b border-[#202225] px-4 py-3">
-        <h3 className="text-sm font-bold text-white">{title}</h3>
-        <button className="rounded p-1 text-gray-400 hover:bg-[#3a3d42] hover:text-white" onClick={onClose}><X size={16} /></button>
+const Modal = ({ title, onClose, children, wide = false }) => {
+  const panelRef = useRef(null);
+  useEffect(() => {
+    panelRef.current?.focus();
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm overflow-y-auto"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div ref={panelRef} tabIndex={-1}
+        className={`w-full ${wide ? 'max-w-2xl' : 'max-w-lg'} m-auto rounded-xl border border-[#242A35] bg-[#171A21] shadow-2xl flex max-h-[90vh] flex-col animate-[ermineModalIn_150ms_ease-out] focus:outline-none`}
+        onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}>
+        <div className="flex shrink-0 items-center justify-between border-b border-[#202225] px-4 py-3">
+          <h3 className="text-sm font-bold text-white">{title}</h3>
+          <button className="rounded p-1 text-gray-400 hover:bg-[#3a3d42] hover:text-white transition-colors" onClick={onClose}><X size={16} /></button>
+        </div>
+        <div className="p-4 overflow-y-auto space-y-3 flex-1">{children}</div>
       </div>
-      <div className="p-4 overflow-y-auto space-y-3 flex-1">{children}</div>
     </div>
-  </div>
-);
+  );
+};
 
 // ─── Date separator ───────────────────────────────────────────────────────────
 const DateSep = ({ msg }) => (
@@ -263,6 +328,29 @@ const renderLinks = (text, key, openLink) =>
 
 const renderMd = (text, key, openLink) => {
   if (!text) return null;
+  // First split on triple-backtick code blocks
+  const parts = text.split(/(```[\s\S]*?```)/g);
+  if (parts.length > 1) {
+    return parts.map((part, pi) => {
+      if (part.startsWith('```') && part.endsWith('```')) {
+        const inner = part.slice(3, -3);
+        const nl = inner.indexOf('\n');
+        const lang = nl > -1 ? inner.slice(0, nl).trim() : '';
+        const code = nl > -1 ? inner.slice(nl + 1) : inner;
+        return (
+          <pre key={`${key}-cb-${pi}`} className="my-1.5 overflow-x-auto rounded bg-[#1a1b1e] border border-[#2f3237] p-3 text-xs font-mono text-[#f2f3f5] whitespace-pre">
+            {lang && <div className="mb-1.5 text-[10px] text-gray-500 uppercase tracking-wide">{lang}</div>}
+            {code}
+          </pre>
+        );
+      }
+      return <React.Fragment key={`${key}-cp-${pi}`}>{renderMdInline(part, `${key}-ci-${pi}`, openLink)}</React.Fragment>;
+    });
+  }
+  return renderMdInline(text, key, openLink);
+};
+const renderMdInline = (text, key, openLink) => {
+  if (!text) return null;
   return text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|__[^_]+__|~~[^~]+~~|\[[^\]]+\]\([^)]+\))/g).map((tok, i) => {
     if (/^`[^`]+`$/.test(tok)) return <code key={`${key}-${i}`} className="rounded bg-[#232428] px-1 py-0.5 text-xs font-mono text-[#f2f3f5]">{tok.slice(1,-1)}</code>;
     if (/^\*\*[^*]+\*\*$/.test(tok)) return <strong key={`${key}-${i}`}>{tok.slice(2,-2)}</strong>;
@@ -304,7 +392,7 @@ const attachData = (a, cdn, idx = 0) => {
   const ct  = a?.content_type || a?.contentType || a?.metadata?.type || '';
   return { id, fn, url: id ? `${cdn}/attachments/${id}` : null, img: isImg(fn, ct) };
 };
-const isImgUrl = (u) => u && /\.(png|jpe?g|webp|gif|bmp|avif|svg)(\?.*)?$/i.test(u.split('?')[0]);
+const isImgUrl = (u) => u && /\.(png|jpe?g|webp|gif|gifv|bmp|avif|svg)(\?.*)?$/i.test(u.split('?')[0]);
 const extractUrls = (v = '') => v.match(/https?:\/\/[^\s]+/gi) || [];
 
 // ─── Message content renderer ─────────────────────────────────────────────────
@@ -413,14 +501,26 @@ const StatusBadge = ({ status }) => {
 // ─── Typing indicator ─────────────────────────────────────────────────────────
 const TypingIndicator = ({ userIds, users }) => {
   const names = useMemo(() => userIds.slice(0, 3).map((id) => users[id]?.username || 'Someone'), [userIds, users]);
-  if (!names.length) return null;
+  if (!names.length) return <div className="h-5" />;
   const label = names.length === 1 ? `${names[0]} is typing` : names.length === 2 ? `${names[0]} and ${names[1]} are typing` : `${names[0]}, ${names[1]} and ${names.length - 2} more are typing`;
   return (
-    <div className="flex items-center gap-2 px-4 py-1 text-xs text-gray-400 select-none">
+    <div className="flex items-center gap-2 px-4 py-0.5 text-xs text-gray-400 select-none h-5">
       <span className="flex items-center gap-0.5 h-4">{[0,1,2].map((i) => <span key={i} className="typing-dot w-1.5 h-1.5 rounded-full bg-gray-400 inline-block" style={{ animationDelay: `${i * 0.15}s` }} />)}</span>
       <span><strong className="text-gray-300">{label}</strong>…</span>
     </div>
   );
+};
+
+// ─── Message grouping ─────────────────────────────────────────────────────────
+const isGroupedWithPrev = (msg, prev) => {
+  if (!prev || msg.system || prev.system) return false;
+  const a1 = typeof msg.author  === 'string' ? msg.author  : msg.author?._id;
+  const a2 = typeof prev.author === 'string' ? prev.author : prev.author?._id;
+  if (a1 !== a2) return false;
+  if ((msg.masquerade?.name ?? null) !== (prev.masquerade?.name ?? null)) return false;
+  const t1 = msg.createdAt  ? new Date(msg.createdAt).getTime()  : ulidToMillis(msg._id);
+  const t2 = prev.createdAt ? new Date(prev.createdAt).getTime() : ulidToMillis(prev._id);
+  return t1 - t2 < 7 * 60 * 1000;
 };
 
 // ─── Reactions helpers ────────────────────────────────────────────────────────
@@ -431,7 +531,7 @@ const replyId = (m) => { const r = Array.isArray(m?.replies) ? m.replies[0] : nu
 const Message = memo(({
   message, users, channels, me, onUser, cdn, onReact, onReply,
   replyTarget, jumpTo, regRef, ceById, reactOpts, openLink,
-  onEdit, onDelete, replyMap,
+  onEdit, onDelete, replyMap, grouped,
 }) => {
   // Masquerade support: bots can override display name/avatar/colour
   const masq    = message.masquerade;
@@ -475,10 +575,8 @@ const Message = memo(({
     if (!embeddedUrls.length) { setResolved([]); return; }
     let cancel = false;
     Promise.all(embeddedUrls.map(async (u) => {
-      if (/^https?:\/\/media\.tenor\.com\//i.test(u)) {
-        try { const r = await fetch(`https://tenor.com/oembed?url=${encodeURIComponent(u)}`); if (!r.ok) return { u, src: u }; const d = await r.json(); return { u, src: d?.url || d?.thumbnail_url || u }; }
-        catch { return { u, src: u }; }
-      }
+      // Tenor: just display the media URL directly (oEmbed is CORS-blocked in browsers)
+      if (/^https?:\/\/media\.tenor\.com\//i.test(u)) return { u, src: u };
       if (isImgUrl(u)) return { u, src: u };
       return null;
     })).then((r) => { if (!cancel) setResolved(r.filter(Boolean)); });
@@ -504,14 +602,20 @@ const Message = memo(({
 
   return (
     <article
-      className={`group relative flex gap-3 px-4 py-0.5 transition-colors duration-75 hover:bg-[#2e3035] ${replyTarget === message._id ? 'bg-[#3a3f66]/20' : ''}`}
+      className={`group relative flex gap-3 px-4 ${grouped ? 'py-0.5' : 'pt-2 pb-0.5'} transition-colors duration-75 hover:bg-[#2e3035] ${replyTarget === message._id ? 'bg-[#3a3f66]/20' : ''}`}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       ref={(n) => regRef(message._id, n)}
     >
-      <button className="mt-0.5 shrink-0" onClick={() => onUser(displayUser, authorId)} type="button">
-        <Avatar user={displayUser} cdn={cdn} always={hovered} />
-      </button>
+      <div className="w-10 shrink-0 flex justify-center">
+        {grouped ? (
+          <time className={`mt-1.5 text-[10px] text-gray-600 select-none transition-opacity leading-none ${hovered || pickerOpen ? 'opacity-100' : 'opacity-0'}`}>{(() => { try { const d = message.createdAt ? new Date(message.createdAt) : ulidToDate(message._id); return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); } catch { return ''; } })()}</time>
+        ) : (
+          <button className="mt-0.5" onClick={() => onUser(displayUser, authorId)} type="button">
+            <Avatar user={displayUser} cdn={cdn} always={hovered} />
+          </button>
+        )}
+      </div>
       <div className="min-w-0 flex-1 py-1">
         {rid && (
           <button className="mb-1 flex max-w-full items-center gap-1 text-xs text-gray-400 hover:text-gray-200 transition-colors" onClick={() => jumpTo(rid)} type="button">
@@ -520,13 +624,15 @@ const Message = memo(({
           </button>
         )}
 
-        <div className="flex items-baseline gap-2">
-          <button className="text-sm font-semibold hover:underline" onClick={() => onUser(displayUser, authorId)} style={{ color: displayColor || '#fff' }} type="button">{displayUser.username}</button>
-          {masq && <span className="rounded bg-[#f0b232]/20 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#f0b232]">BOT</span>}
-          {mine && !masq && <span className="rounded bg-[#5865f2]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[#bdc3ff]">YOU</span>}
-          <time className="text-[11px] text-gray-500">{ts}</time>
-          {message.edited && <span className="text-[10px] text-gray-500">(edited)</span>}
-        </div>
+        {!grouped && (
+          <div className="flex items-baseline gap-2 mb-0.5">
+            <button className="text-sm font-semibold hover:underline" onClick={() => onUser(displayUser, authorId)} style={{ color: displayColor || '#fff' }} type="button">{displayUser.username}</button>
+            {masq && <span className="rounded bg-[#f0b232]/20 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#f0b232]">BOT</span>}
+            {mine && !masq && <span className="rounded bg-[#5865f2]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[#bdc3ff]">YOU</span>}
+            <time className="text-[11px] text-gray-500" title={ts}>{ts}</time>
+            {message.edited && <span className="text-[10px] text-gray-600">(edited)</span>}
+          </div>
+        )}
 
         {editing ? (
           <div className="mt-1 rounded bg-[#383a40] p-2">
@@ -546,7 +652,7 @@ const Message = memo(({
         {resolvedImgs.length > 0 && !message.embeds?.length && (
           <div className="mt-1.5 flex flex-wrap gap-2">
             {resolvedImgs.map((img, i) => (
-              <button key={i} className="block overflow-hidden rounded-lg border border-[#2f3237] hover:border-[#4a4d55] transition-colors" onClick={() => openLink(img.u)} type="button">
+              <button key={i} className="block overflow-hidden rounded-lg border border-[#2f3237] hover:border-[#4a4d55] transition-colors cursor-zoom-in" onClick={() => openImage(img.src)} type="button">
                 <img alt="" className="max-h-64 max-w-full object-contain" src={img.src} loading="lazy" />
               </button>
             ))}
@@ -559,7 +665,7 @@ const Message = memo(({
             {message.attachments.map((a, i) => {
               const { id, fn, url, img } = attachData(a, cdn, i); if (!id || !url) return null;
               return img
-                ? <a key={id} href={url} target="_blank" rel="noreferrer" className="block overflow-hidden rounded border border-[#3a3d42] hover:border-[#5c606a] transition-colors"><img alt={fn} className="max-h-64 max-w-full object-contain" src={url} /></a>
+                ? <button key={id} type="button" className="block overflow-hidden rounded border border-[#3a3d42] hover:border-[#5c606a] transition-colors cursor-zoom-in" onClick={() => openImage(url)}><img alt={fn} className="max-h-64 max-w-full object-contain" src={url} /></button>
                 : <a key={id} href={url} target="_blank" rel="noreferrer" className="rounded bg-[#232428] px-2 py-1 text-xs text-[#bdc3ff] hover:bg-[#2f3136] flex items-center gap-1">📎 {fn}</a>;
             })}
           </div>
@@ -587,7 +693,7 @@ const Message = memo(({
           <button className="p-1.5 text-gray-400 hover:text-gray-200 hover:bg-[#404249]" onClick={() => setPickerOpen((p) => !p)} title="React"><span className="text-sm leading-none">😊</span></button>
           {mine && <>
             <button className="p-1.5 text-gray-400 hover:text-gray-200 hover:bg-[#404249]" onClick={() => { setEditVal(message.content || ''); setEditing(true); setPickerOpen(false); }} title="Edit"><Edit2 size={14} /></button>
-            <button className="p-1.5 text-red-400 hover:text-red-200 hover:bg-[#404249] rounded-r-md" onClick={() => onDelete(message._id)} title="Delete"><Trash2 size={14} /></button>
+            <button className="p-1.5 text-red-400 hover:text-red-200 hover:bg-[#404249] rounded-r-md" onClick={() => onDelete(message)} title="Delete"><Trash2 size={14} /></button>
           </>}
         </div>
       </div>
@@ -619,6 +725,162 @@ const Message = memo(({
     </article>
   );
 });
+
+
+// ─── User Settings Panel ──────────────────────────────────────────────────────
+const UserSettingsPanel = ({ user, cdn, apiUrl, token, onUpdate, addToast, isLowSpec, openStatusEditor }) => {
+  const [tab,          setTab]          = useState('profile');
+  const [displayName,  setDisplayName]  = useState('');
+  const [bio,          setBio]          = useState('');
+  const [saving,       setSaving]       = useState(false);
+  const [pwCurrent,    setPwCurrent]    = useState('');
+  const [pwNew,        setPwNew]        = useState('');
+  const [pwConfirm,    setPwConfirm]    = useState('');
+  const [pwSaving,     setPwSaving]     = useState(false);
+  const avatarInputRef = useRef(null);
+
+  useEffect(() => {
+    setDisplayName(user?.display_name || user?.username || '');
+    setBio(user?.profile?.content || user?.bio || '');
+  }, [user]);
+
+  const saveProfile = async () => {
+    setSaving(true);
+    try {
+      const r = await fetch(`${apiUrl}/users/@me`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-session-token': token },
+        body: JSON.stringify({
+          display_name: displayName.trim() || undefined,
+          profile: { content: bio.trim() || undefined },
+        }),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).description || 'Save failed');
+      const d = await r.json(); onUpdate(d);
+      addToast('Profile saved!', 'success');
+    } catch (err) { addToast(err.message, 'error'); }
+    finally { setSaving(false); }
+  };
+
+  const changePassword = async () => {
+    if (!pwNew || pwNew !== pwConfirm) { addToast('Passwords do not match', 'error'); return; }
+    setPwSaving(true);
+    try {
+      const r = await fetch(`${apiUrl}/auth/account/change/password`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-session-token': token },
+        body: JSON.stringify({ current_password: pwCurrent, new_password: pwNew }),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).description || 'Failed');
+      addToast('Password changed!', 'success');
+      setPwCurrent(''); setPwNew(''); setPwConfirm('');
+    } catch (err) { addToast(err.message, 'error'); }
+    finally { setPwSaving(false); }
+  };
+
+  const uploadAvatar = async (file) => {
+    if (!file) return;
+    try {
+      const body = new FormData(); body.append('file', file);
+      const autumn = cdn.replace(/\/[^/]*$/, ''); // get base CDN
+      const ur = await fetch(`${cdn}/avatars`, { method: 'POST', body, headers: { 'X-Session-Token': token } });
+      if (!ur.ok) throw new Error('Upload failed');
+      const { id } = await ur.json();
+      const r = await fetch(`${apiUrl}/users/@me`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'x-session-token': token }, body: JSON.stringify({ avatar: id }) });
+      if (!r.ok) throw new Error('Failed to update avatar');
+      const d = await r.json(); onUpdate(d);
+      addToast('Avatar updated!', 'success');
+    } catch (err) { addToast(err.message, 'error'); }
+  };
+
+  const bannerSrc = user?.profile?.background?._id ? `${cdn}/backgrounds/${user.profile.background._id}/original` : null;
+  const tabs = [
+    { id: 'profile', label: 'Profile' },
+    { id: 'account', label: 'Account' },
+    { id: 'about',   label: 'About' },
+  ];
+
+  return (
+    <div className="flex gap-4 min-h-[360px]">
+      {/* Tab nav */}
+      <nav className="w-32 shrink-0 space-y-0.5">
+        {tabs.map((t) => (
+          <button key={t.id} className={`w-full rounded px-3 py-2 text-left text-sm font-medium transition-colors ${tab === t.id ? 'bg-[#404249] text-white' : 'text-gray-400 hover:bg-[#35373c] hover:text-white'}`} onClick={() => setTab(t.id)}>{t.label}</button>
+        ))}
+      </nav>
+
+      {/* Tab content */}
+      <div className="flex-1 min-w-0">
+        {tab === 'profile' && (
+          <div className="space-y-4">
+            {/* Banner + Avatar */}
+            <div className="relative">
+              <div className="h-20 rounded-lg overflow-hidden">
+                {bannerSrc ? <img src={bannerSrc} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full bg-gradient-to-br from-[#3b3f6b] to-[#5865f2]" />}
+              </div>
+              <div className="absolute -bottom-6 left-3 flex items-end gap-2">
+                <div className="relative group cursor-pointer" onClick={() => avatarInputRef.current?.click()}>
+                  <Avatar user={user} cdn={cdn} size="lg" always />
+                  <div className="absolute inset-0 grid place-items-center rounded-full bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity text-white">
+                    <Paperclip size={14} />
+                  </div>
+                </div>
+                <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => uploadAvatar(e.target.files?.[0])} />
+              </div>
+            </div>
+            <div className="pt-8">
+              <div className="text-base font-bold text-white">{user?.username}</div>
+              <div className="text-xs text-gray-400">#{user?.discriminator || '0000'}</div>
+            </div>
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wide text-gray-400 block mb-1">Display Name</label>
+              <input className={inputBase} value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Display name (optional)" maxLength={32} />
+              <p className="mt-0.5 text-[11px] text-gray-500">Shown instead of your username in chats</p>
+            </div>
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wide text-gray-400 block mb-1">About Me</label>
+              <textarea className={`${inputBase} h-20 resize-none`} value={bio} onChange={(e) => setBio(e.target.value)} placeholder="Tell people a bit about yourself…" maxLength={2000} />
+            </div>
+            <button className="rounded-md bg-[#5865f2] px-4 py-2 text-sm font-semibold text-white hover:bg-[#4956d8] disabled:opacity-60 transition-colors" disabled={saving} onClick={saveProfile}>{saving ? 'Saving…' : 'Save Changes'}</button>
+          </div>
+        )}
+        {tab === 'account' && (
+          <div className="space-y-5">
+            <div>
+              <div className="text-xs font-bold uppercase tracking-wide text-gray-400 mb-2">Status</div>
+              <button className="rounded-md bg-[#3a3d42] px-4 py-2 text-sm text-gray-200 hover:bg-[#4a4d55] transition-colors" onClick={openStatusEditor}>Set Status…</button>
+            </div>
+            <div className="border-t border-[#2f3237] pt-4">
+              <div className="text-xs font-bold uppercase tracking-wide text-gray-400 mb-3">Change Password</div>
+              <div className="space-y-2">
+                <input className={inputBase} type="password" value={pwCurrent} onChange={(e) => setPwCurrent(e.target.value)} placeholder="Current password" autoComplete="current-password" />
+                <input className={inputBase} type="password" value={pwNew}     onChange={(e) => setPwNew(e.target.value)}     placeholder="New password" autoComplete="new-password" />
+                <input className={inputBase} type="password" value={pwConfirm} onChange={(e) => setPwConfirm(e.target.value)} placeholder="Confirm new password" autoComplete="new-password" />
+              </div>
+              <button className="mt-2 rounded-md bg-[#5865f2] px-4 py-2 text-sm font-semibold text-white hover:bg-[#4956d8] disabled:opacity-60 transition-colors" disabled={pwSaving || !pwCurrent || !pwNew} onClick={changePassword}>{pwSaving ? 'Saving…' : 'Change Password'}</button>
+            </div>
+          </div>
+        )}
+        {tab === 'about' && (
+          <div className="space-y-4">
+            <div className="flex items-start gap-3 rounded-lg bg-[#2b2d31] p-3">
+              <div className="p-2 bg-[#3a3d42] rounded-lg shrink-0"><Info size={18} className="text-[#8AB4F8]" /></div>
+              <div>
+                <div className="text-sm font-bold text-white">Ermine v0.3.0</div>
+                <div className="text-xs text-gray-400 mt-0.5">Rendering mode: {isLowSpec ? 'Lite (reduced motion)' : 'Standard'}</div>
+                <a href="https://ko-fi.com/stoatchat" target="_blank" rel="noopener noreferrer" className="text-xs text-[#5865f2] hover:underline mt-1 inline-block">Support Stoat on Ko-fi →</a>
+              </div>
+            </div>
+            <div className="text-xs text-gray-400 rounded-lg bg-[#1e1f22] p-3 space-y-1">
+              <p>Ermine is an experimental third-party client for stoat.chat.</p>
+              <p>Your session token is stored in a cookie on this device only. Ermine does not transmit credentials anywhere except the configured stoat.chat API endpoint.</p>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 // ─── AppShell ─────────────────────────────────────────────────────────────────
 function AppShell() {
@@ -694,6 +956,25 @@ function AppShell() {
   const [privacyConsent,setPrivacyConsent]= useState(false);
   const [wsReconnect,   setWsReconnect]   = useState(0);
 
+  // ── Toast notifications ──
+  const [toasts, setToasts] = useState([]);
+  const addToast = useCallback((msg, type = 'info', ms = 4500) => {
+    const id = `t-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setToasts((p) => [...p.slice(-4), { id, msg, type }]);
+    setTimeout(() => setToasts((p) => p.filter((t) => t.id !== id)), ms);
+  }, []);
+
+  // ── Delete confirmation ──
+  const [deleteTarget,         setDeleteTarget]         = useState(null);
+  const [deleteServerPending,  setDeleteServerPending]  = useState(false);
+
+  // ── Sidebar search ──
+  const [channelSearch,    setChannelSearch]    = useState('');
+  const [friendSearch,     setFriendSearch]     = useState('');
+  const [addFriendInput,   setAddFriendInput]   = useState('');
+  const [addFriendLoading, setAddFriendLoading] = useState(false);
+  const [showAddFriend,    setShowAddFriend]    = useState(false);
+
   // ── Refs ──
   const wsRef              = useRef(null);
   const botRef             = useRef(null);   // messages bottom
@@ -721,7 +1002,11 @@ function AppShell() {
   const curMsgsRef         = useRef([]);
   const fetchMsgsRef       = useRef(null);
   const selChannelRef      = useRef(selChannel);
+  const usersRef           = useRef(users);   // avoids fetchMissingUsers re-render loop
+  const logoutRef          = useRef(null);    // stable ref for WS handler
+
   selChannelRef.current = selChannel;
+  usersRef.current      = users;
 
   // ── Composer resize ──
   useEffect(() => {
@@ -796,11 +1081,11 @@ function AppShell() {
   }, [auth.token, config.apiUrl, upsertUsers]);
 
   const fetchMissingUsers = useCallback(async (msgs = []) => {
-    if (!canFetchUsersRef.current || !sameOrigin) return;
+    if (!canFetchUsersRef.current) return;
     const need = new Set();
     msgs.forEach((m) => {
       const aid = typeof m?.author === 'string' ? m.author : m?.author?._id;
-      if (aid && aid !== '00000000000000000000000000' && !users[aid] && !pendingUsersRef.current.has(aid)) need.add(aid);
+      if (aid && aid !== '00000000000000000000000000' && !usersRef.current[aid] && !pendingUsersRef.current.has(aid)) need.add(aid);
     });
     if (!need.size) return;
     const ids = [...need].slice(0, 8);
@@ -816,7 +1101,7 @@ function AppShell() {
         if (!loggedFetchErrRef.current) { loggedFetchErrRef.current = true; console.warn('Background user fetch disabled.'); }
       } finally { pendingUsersRef.current.delete(uid); }
     }));
-  }, [auth.token, config.apiUrl, sameOrigin, upsertUsers, users]);
+  }, [auth.token, config.apiUrl, upsertUsers]); // no `users` dep — uses usersRef
 
   const fetchReplyMsg = useCallback(async (channelId, rid) => {
     if (!channelId || !rid || replyCacheRef.current[rid]) return;
@@ -1041,13 +1326,18 @@ function AppShell() {
         setServers((p) => { const n = { ...p }; packet.servers?.forEach((s) => { n[s._id] = s; }); return n; });
         setChannels((p) => { const n = { ...p }; packet.channels?.forEach((c) => { n[c._id] = c; }); return n; });
         setMembers((p) => { const n = { ...p }; packet.members?.forEach((m) => { n[`${m._id.server}:${m._id.user}`] = m; }); return n; });
-        // Seed initial unread from channel last_message_id (simple heuristic)
+        // Seed initial unreads from /sync/unreads
+        fetch(`${config.apiUrl}/sync/unreads`, { headers: { 'x-session-token': auth.token } }).then((r) => r.ok ? r.json() : []).then((list) => {
+          if (!Array.isArray(list)) return;
+          const ids = new Set(list.map((u) => u.channel?._id || u.channel).filter(Boolean));
+          if (ids.size) setUnreadChannels((p) => { const n = new Set(p); ids.forEach((id) => n.add(id)); return n; });
+        }).catch(() => {});
         setStatus('ready');
         break;
       case 'Bulk': packet.v?.forEach((e) => applyEventRef.current?.(e)); break;
       case 'Authenticated': setStatus('authenticated'); break;
       case 'Error': setStatus(`error:${packet.error || 'unknown'}`); break;
-      case 'Logout': logout(); break;
+      case 'Logout': logoutRef.current?.(); break; // FIXED: stable ref
       // Messages
       case 'Message':
         upsertUsersFromMsgs([packet]);
@@ -1164,7 +1454,7 @@ function AppShell() {
       if (dead || view !== 'app') return;
       wsReconTimRef.current = setTimeout(() => setWsReconnect((v) => v + 1), 2500);
     };
-    ws.onmessage = (e) => applyEventRef.current?.(JSON.parse(e.data));
+    ws.onmessage = (e) => { try { applyEventRef.current?.(JSON.parse(e.data)); } catch {} }; // FIXED: try/catch
     const hb = setInterval(() => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'Ping', data: Date.now() })); }, 20000);
     return () => { dead = true; clearInterval(hb); if (wsReconTimRef.current) { clearTimeout(wsReconTimRef.current); wsReconTimRef.current = null; } ws.close(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1286,6 +1576,8 @@ function AppShell() {
   };
   const regRef = (id, node) => { if (!id) return; if (node) msgRefs.current[id] = node; else delete msgRefs.current[id]; };
   const goLatest = () => { isPgScrollRef.current = true; autoFollowRef.current = true; botRef.current?.scrollIntoView({ behavior: 'smooth' }); requestAnimationFrame(() => { isPgScrollRef.current = false; }); setShowGoLatest(false); };
+  const [lightboxUrl, setLightboxUrl] = useState(null);
+  const openImage = (url) => setLightboxUrl(url);
   const openLink = (url) => setLinkPromptUrl(url);
   const confirmLink = () => { if (!linkPromptUrl) return; window.open(linkPromptUrl, '_blank', 'noopener,noreferrer'); setLinkPromptUrl(null); };
 
@@ -1328,7 +1620,7 @@ function AppShell() {
     finally { setIsLoggingIn(false); }
   };
 
-  const logout = () => {
+  const logout = useCallback(() => {
     [TK,UK,AK].forEach(clearCookie);
     ['stoat_token','stoat_user_id','stoat_api_url'].forEach((k) => localStorage.removeItem(k));
     setAuth({ token: null, userId: null });
@@ -1338,20 +1630,25 @@ function AppShell() {
     setIsMembLoading(false); setWsReconnect(0); setUnreadChannels(new Set()); setTypingInChannel({});
     if (wsReconTimRef.current) { clearTimeout(wsReconTimRef.current); wsReconTimRef.current = null; }
     setView('login'); setStatus('disconnected');
-  };
+  }, []);
+  logoutRef.current = logout;
 
   // ── Messaging ──
   const sendMessage = async () => {
     const content = inputText.trim(); const hasFiles = pendingFiles.length > 0;
     if ((!content && !hasFiles) || !selChannel || selChannel === 'friends') return;
-    setInputText(''); setIsUploading(hasFiles); sendTypingEnd();
+    // Capture before any state changes so async work sees the right values
+    const capturedFiles = [...pendingFiles];
+    const capturedReply = replyingTo;
+    setInputText(''); setPendingFiles([]); setReplyingTo(null); setShowEmojiPicker(false);
+    setIsUploading(hasFiles); sendTypingEnd();
     const nonce = crypto.randomUUID(); const pid = `pending-${nonce}`;
     const me = users[auth.userId] || { _id: auth.userId, username: 'You' };
-    const opt = { _id: pid, channel: selChannel, author: auth.userId, user: me, content, createdAt: new Date().toISOString(), reactions: {}, replies: replyingTo ? [{ id: replyingTo._id, mention: false }] : undefined, attachments: pendingFiles.map((f, i) => ({ _id: `pa-${i}-${f.name}`, filename: f.name })) };
+    const opt = { _id: pid, channel: selChannel, author: auth.userId, user: me, content, createdAt: new Date().toISOString(), reactions: {}, replies: capturedReply ? [{ id: capturedReply._id, mention: false }] : undefined };
     setMessages((p) => { const l = p[selChannel] || []; return { ...p, [selChannel]: uniq([...l, opt]).slice(-200) }; });
     try {
-      const aids = hasFiles ? await uploadFiles(pendingFiles) : [];
-      const payload = { content, nonce, replies: replyingTo ? [{ id: replyingTo._id, mention: false }] : undefined, attachments: aids.length ? aids : undefined };
+      const aids = hasFiles ? await uploadFiles(capturedFiles) : [];
+      const payload = { content, nonce, replies: capturedReply ? [{ id: capturedReply._id, mention: false }] : undefined, attachments: aids.length ? aids : undefined };
       const r = await fetch(`${config.apiUrl}/channels/${selChannel}/messages`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-session-token': auth.token }, body: JSON.stringify(payload) });
       if (!r.ok) throw new Error('Send failed');
       const posted = await r.json();
@@ -1363,7 +1660,6 @@ function AppShell() {
           return { ...p, [selChannel]: uniq(dd.sort((a, b) => a._id > b._id ? 1 : -1)) };
         });
       }
-      setPendingFiles([]); setReplyingTo(null); setShowEmojiPicker(false);
     } catch {
       setMessages((p) => ({ ...p, [selChannel]: (p[selChannel] || []).filter((m) => m._id !== pid) }));
       setInputText(content);
@@ -1372,13 +1668,16 @@ function AppShell() {
 
   const editMessage = async (msgId, content) => {
     try { await fetch(`${config.apiUrl}/channels/${selChannel}/messages/${msgId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'x-session-token': auth.token }, body: JSON.stringify({ content }) }); }
-    catch (err) { console.error(err); }
+    catch { addToast('Failed to edit message', 'error'); }
   };
 
-  const deleteMessage = async (msgId) => {
-    if (!confirm('Delete this message?')) return;
-    try { await fetch(`${config.apiUrl}/channels/${selChannel}/messages/${msgId}`, { method: 'DELETE', headers: { 'x-session-token': auth.token } }); }
-    catch (err) { console.error(err); }
+  const requestDeleteMessage = useCallback((msg) => setDeleteTarget(msg), []);
+  const confirmDeleteMessage = async () => {
+    if (!deleteTarget) return;
+    const mid = deleteTarget._id; setDeleteTarget(null);
+    setMessages((p) => ({ ...p, [selChannel]: (p[selChannel] ?? []).filter((m) => m._id !== mid) }));
+    try { await fetch(`${config.apiUrl}/channels/${selChannel}/messages/${mid}`, { method: 'DELETE', headers: { 'x-session-token': auth.token } }); }
+    catch { addToast('Failed to delete message', 'error'); }
   };
 
   const toggleReaction = async (msg, emoji, reacted) => {
@@ -1442,21 +1741,35 @@ function AppShell() {
   };
   const deleteServer = async () => {
     if (!selServer || selServer === '@me') return;
-    if (!confirm(`Delete "${selServerObj?.name}"? This cannot be undone.`)) return;
-    setIsUpdatingServer(true);
+    setDeleteServerPending(true);
+  };
+  const confirmDeleteServer = async () => {
+    setDeleteServerPending(false); setIsUpdatingServer(true);
     try { await fetch(`${config.apiUrl}/servers/${selServer}`, { method: 'DELETE', headers: { 'x-session-token': auth.token } }); setActiveModal(null); }
-    catch {} finally { setIsUpdatingServer(false); }
+    catch { addToast('Failed to delete space', 'error'); } finally { setIsUpdatingServer(false); }
   };
 
   // ── Friend requests ──
   const sendFriendRequest = async (username) => {
     if (!username?.trim()) return;
-    try { const r = await fetch(`${config.apiUrl}/users/${username}/friend`, { method: 'PUT', headers: { 'x-session-token': auth.token } }); if (!r.ok) throw new Error('Failed'); const d = await r.json(); if (d?._id) upsertUsers([d]); }
-    catch (err) { alert(err.message); }
+    try {
+      const r = await fetch(`${config.apiUrl}/users/${username}/friend`, { method: 'PUT', headers: { 'x-session-token': auth.token } });
+      if (!r.ok) throw new Error((await r.json().catch(() => null))?.description || 'User not found');
+      const d = await r.json(); if (d?._id) upsertUsers([d]);
+      addToast('Friend request sent!', 'success');
+    } catch (err) { addToast(err.message, 'error'); }
   };
   const removeFriend = async (userId) => {
     try { const r = await fetch(`${config.apiUrl}/users/${userId}/friend`, { method: 'DELETE', headers: { 'x-session-token': auth.token } }); if (!r.ok) throw new Error('Failed'); const d = await r.json(); if (d?._id) upsertUsers([d]); }
     catch {}
+  };
+
+  const handleAddFriend = async () => {
+    if (!addFriendInput.trim()) return;
+    setAddFriendLoading(true);
+    await sendFriendRequest(addFriendInput.trim());
+    setAddFriendInput('');
+    setAddFriendLoading(false);
   };
 
   // ── Composer helpers ──
@@ -1550,6 +1863,30 @@ function AppShell() {
     <div className="flex h-screen overflow-hidden bg-[#0F1115] text-[#E6EDF3]">
 
       {/* ════ MODALS ════ */}
+
+      {deleteServerPending && selServerObj && (
+        <Modal onClose={() => setDeleteServerPending(false)} title="Delete Space">
+          <p className="text-sm text-gray-300">Are you sure you want to permanently delete <strong className="text-white">{selServerObj.name}</strong>? This cannot be undone.</p>
+          <div className="flex gap-2 justify-end">
+            <button className="rounded px-3 py-1.5 text-sm text-gray-400 hover:text-white hover:bg-[#3a3d42] transition-colors" onClick={() => setDeleteServerPending(false)}>Cancel</button>
+            <button className="rounded bg-red-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-700 transition-colors disabled:opacity-60" disabled={isUpdatingServer} onClick={confirmDeleteServer}>Delete</button>
+          </div>
+        </Modal>
+      )}
+
+      {deleteTarget && (
+        <Modal onClose={() => setDeleteTarget(null)} title="Delete Message">
+          <div className="rounded-lg bg-[#1e1f22] border border-[#3f4249] p-3">
+            <p className="text-xs text-gray-400 mb-1">Message from <strong className="text-white">{users[typeof deleteTarget.author === 'string' ? deleteTarget.author : deleteTarget.author?._id]?.username ?? 'Unknown'}</strong></p>
+            <p className="text-sm text-gray-200 truncate">{deleteTarget.content ?? '[attachment]'}</p>
+          </div>
+          <p className="text-sm text-gray-300">This cannot be undone.</p>
+          <div className="flex gap-2 justify-end">
+            <button className="rounded px-3 py-1.5 text-sm text-gray-400 hover:text-white hover:bg-[#3a3d42] transition-colors" onClick={() => setDeleteTarget(null)}>Cancel</button>
+            <button className="rounded bg-red-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-700 transition-colors" onClick={confirmDeleteMessage}>Delete</button>
+          </div>
+        </Modal>
+      )}
 
       {activeModal === 'create-server' && (
         <Modal onClose={() => setActiveModal(null)} title="Create a Space">
@@ -1645,32 +1982,28 @@ function AppShell() {
       )}
 
       {activeModal === 'user-settings' && (
-        <Modal onClose={() => setActiveModal(null)} title="Preferences">
-          <div className="flex flex-col items-stretch">
-            <div className="h-24 rounded-lg overflow-hidden relative">
-              {bannerUrl(users[auth.userId], config.cdnUrl)
-                ? <img src={bannerUrl(users[auth.userId], config.cdnUrl)} alt="" className="w-full h-full object-cover" />
-                : <div className="w-full h-full bg-gradient-to-r from-[#3b3f6b] to-[#5865f2]" />
-              }
-              <div className="absolute -bottom-7 left-4 p-1 bg-[#1e1f22] rounded-full"><Avatar user={users[auth.userId]} cdn={config.cdnUrl} size="lg" /></div>
-            </div>
-            <div className="pt-10 px-1">
-              <div className="text-xl font-bold text-white">{users[auth.userId]?.username || 'User'}</div>
-              <div className="text-xs text-gray-400">#{users[auth.userId]?.discriminator || '0000'}</div>
-            </div>
-          </div>
-          <div className="border-t border-[#2f3237] pt-3 space-y-2">
-            <div className="text-xs font-bold uppercase tracking-wide text-gray-400 mb-2">About Ermine</div>
-            <div className="flex items-start gap-3 bg-[#2b2d31] p-3 rounded-lg">
-              <div className="p-2 bg-gray-700 rounded-lg"><AlertCircle size={18} className="text-white" /></div>
-              <div>
-                <div className="text-sm font-bold text-white">Version 0.2.0</div>
-                <div className="text-xs text-gray-400 mt-0.5">Mode: {isLowSpec ? 'Lite' : 'Standard'}</div>
-                <a href="https://ko-fi.com/stoatchat" target="_blank" rel="noopener noreferrer" className="text-xs text-[#5865f2] hover:underline mt-1 inline-block">Support Stoat on Ko-fi →</a>
-              </div>
-            </div>
-          </div>
+        <Modal onClose={() => setActiveModal(null)} title="My Account" wide>
+          <UserSettingsPanel
+            user={users[auth.userId]}
+            cdn={config.cdnUrl}
+            apiUrl={config.apiUrl}
+            token={auth.token}
+            onUpdate={(u) => upsertUsers([u])}
+            addToast={addToast}
+            isLowSpec={isLowSpec}
+            openStatusEditor={openStatusEditor}
+          />
         </Modal>
+      )}
+
+      {lightboxUrl && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/90 p-4 cursor-zoom-out" onClick={() => setLightboxUrl(null)}>
+          <div className="relative max-w-full max-h-full">
+            <img src={lightboxUrl} alt="" className="max-w-full max-h-[90vh] object-contain rounded shadow-2xl cursor-default" onClick={(e) => e.stopPropagation()} />
+            <button className="absolute -top-3 -right-3 rounded-full bg-[#313338] border border-[#4c4f56] p-1.5 text-gray-300 hover:text-white shadow-lg" onClick={() => setLightboxUrl(null)}><X size={14} /></button>
+            <a href={lightboxUrl} target="_blank" rel="noreferrer" className="absolute -bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-[#313338] border border-[#4c4f56] px-3 py-1.5 text-xs text-gray-300 hover:text-white shadow-lg" onClick={(e) => e.stopPropagation()}>Open original</a>
+          </div>
+        </div>
       )}
 
       {linkPromptUrl && (
@@ -1744,7 +2077,7 @@ function AppShell() {
       <aside className={`${showMobileSide ? 'flex' : 'hidden'} md:flex w-60 flex-col bg-[#2b2d31] shrink-0 z-30 md:z-auto absolute md:relative h-full`}>
         {/* Server header */}
         <div className="border-b border-[#202225] px-4 py-3 flex justify-between items-center shrink-0">
-          <div className="truncate text-sm font-bold text-white">{selServer === '@me' ? 'Live' : selServerObj?.name || 'Space'}</div>
+          <div className="truncate text-sm font-bold text-white">{selServer === '@me' ? 'Direct Messages' : selServerObj?.name || 'Space'}</div>
           <div className="flex items-center gap-1">
             {isOwner && selServer !== '@me' && <>
               <button onClick={() => setActiveModal('create-invite')} className="text-gray-400 hover:text-white transition-colors p-0.5" title="Create invite"><Link size={14} /></button>
@@ -1753,21 +2086,37 @@ function AppShell() {
           </div>
         </div>
 
+        {/* Channel/DM search */}
+        <div className="px-2 pt-2 pb-1 shrink-0">
+          <div className="flex items-center gap-1.5 rounded bg-[#1e1f22] px-2 py-1.5">
+            <Search size={12} className="text-gray-500 shrink-0" />
+            <input className="flex-1 bg-transparent text-xs text-gray-200 placeholder:text-gray-500 focus:outline-none" placeholder={selServer === '@me' ? 'Find a DM…' : 'Find channel…'} value={channelSearch} onChange={(e) => setChannelSearch(e.target.value)} />
+            {channelSearch && <button onClick={() => setChannelSearch('')} className="text-gray-500 hover:text-white"><X size={10} /></button>}
+          </div>
+        </div>
+
         {/* Channel list */}
-        <div className="flex-1 overflow-y-auto p-2">
+        <div className="flex-1 overflow-y-auto px-2 pb-2">
           {selServer === '@me' ? (
             <>
               <button className={`mb-0.5 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors ${selChannel === 'friends' ? 'bg-[#404249] text-white' : 'text-gray-400 hover:bg-[#35373c] hover:text-white'}`} onClick={() => { setSelChannel('friends'); setShowMobileSide(false); }}>
                 <Users size={16} /> <span>Direct</span>
               </button>
-              {dmChannels.map((ch) => {
+              {dmChannels.filter((ch) => !channelSearch || dmLabel(ch).toLowerCase().includes(channelSearch.toLowerCase())).map((ch) => {
                 const label = dmLabel(ch);
                 const icon  = chIcon(ch);
                 const rid   = ch.channel_type === 'DirectMessage' ? (ch.recipients || []).find((id) => id !== auth.userId) : null;
                 const unread = unreadChannels.has(ch._id);
                 return (
                   <button key={ch._id} className={`mb-0.5 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors ${selChannel === ch._id ? 'bg-[#404249] text-white' : `text-gray-400 hover:bg-[#35373c] hover:text-white ${unread ? 'text-white' : ''}`}`} onClick={() => selectChannel(ch._id)}>
-                    {rid ? <Avatar user={users[rid]} cdn={config.cdnUrl} size="sm" /> : <span className="text-gray-400">{icon}</span>}
+                    {rid ? (
+                      <div className="relative shrink-0">
+                        <Avatar user={users[rid]} cdn={config.cdnUrl} size="sm" />
+                        {users[rid]?.status?.presence && users[rid]?.status?.presence !== 'Invisible' && (
+                          <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border-2 border-[#2b2d31]" style={{ background: getPresenceColor(users[rid].status.presence) }} />
+                        )}
+                      </div>
+                    ) : <span className="text-gray-400 shrink-0">{icon}</span>}
                     <span className="truncate flex-1">{label}</span>
                     {unread && <span className="unread-dot w-2 h-2 rounded-full bg-white shrink-0" />}
                   </button>
@@ -1775,7 +2124,10 @@ function AppShell() {
               })}
             </>
           ) : (
-            categorisedChannels.map((item, i) => {
+            (channelSearch.trim()
+              ? categorisedChannels.filter((item) => item.type === 'channel' && (item.channel.name ?? '').toLowerCase().includes(channelSearch.toLowerCase()))
+              : categorisedChannels
+            ).map((item, i) => {
               if (item.type === 'category') {
                 const collapsed = collapsedCats[item.id];
                 return (
@@ -1788,8 +2140,8 @@ function AppShell() {
               // type === 'channel'
               const ch = item.channel; const isVoice = ch.channel_type === 'VoiceChannel'; const unread = unreadChannels.has(ch._id);
               return (
-                <button key={ch._id} className={`mb-0.5 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors ${isVoice ? 'cursor-not-allowed text-gray-500' : selChannel === ch._id ? 'bg-[#404249] text-white' : `text-gray-400 hover:bg-[#35373c] hover:text-white ${unread ? 'text-white font-semibold' : ''}`}`}
-                  onClick={() => selectChannel(ch._id)} title={ch.name}>
+                <button key={ch._id} className={`mb-0.5 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors ${isVoice ? 'opacity-40 cursor-not-allowed' : selChannel === ch._id ? 'bg-[#404249] text-white' : `text-gray-400 hover:bg-[#35373c] hover:text-white ${unread ? 'text-white font-semibold' : ''}`}`}
+                  onClick={() => !isVoice && selectChannel(ch._id)} disabled={isVoice} title={ch.name}>
                   <span className={isVoice ? 'text-gray-600' : 'text-gray-400'}>{chIcon(ch)}</span>
                   <span className="truncate flex-1">{ch.name || 'channel'}</span>
                   {unread && <span className="unread-dot w-2 h-2 rounded-full bg-white shrink-0" />}
@@ -1803,8 +2155,11 @@ function AppShell() {
         {/* Account footer */}
         <div className="border-t border-[#202225] p-2 shrink-0">
           <div className="flex items-center justify-between rounded bg-[#232428] p-2" onMouseEnter={() => setIsAccHovered(true)} onMouseLeave={() => setIsAccHovered(false)}>
-            <button className="flex min-w-0 items-center gap-2 rounded p-1 text-left hover:bg-[#2d3036] flex-1" onClick={openStatusEditor} type="button">
-              <Avatar user={users[auth.userId]} cdn={config.cdnUrl} size="sm" always={isAccHovered} />
+            <button className="flex min-w-0 items-center gap-2 rounded p-1 text-left hover:bg-[#2d3036] flex-1 transition-colors" onClick={openStatusEditor} type="button">
+              <div className="relative shrink-0">
+                <Avatar user={users[auth.userId]} cdn={config.cdnUrl} size="sm" always={isAccHovered} />
+                <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-[#232428]" style={{ background: getPresenceColor(users[auth.userId]?.status?.presence) }} />
+              </div>
               <div className="min-w-0">
                 <div className="truncate text-xs font-semibold text-white">{users[auth.userId]?.username || 'Connected'}</div>
                 <div className="truncate text-[10px] text-gray-400">{users[auth.userId]?.status?.text || status}</div>
@@ -1856,11 +2211,29 @@ function AppShell() {
 
           {selChannel === 'friends' ? (
             <div className="space-y-1.5 p-4">
-              <h2 className="text-xs font-bold uppercase tracking-wide text-gray-400 mb-3">Direct ({friends.length})</h2>
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-xs font-bold uppercase tracking-wide text-gray-400">Direct ({friends.length})</h2>
+                <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1.5 rounded bg-[#1e1f22] px-2 py-1">
+                    <Search size={11} className="text-gray-500" />
+                    <input className="bg-transparent text-xs text-gray-200 placeholder:text-gray-500 focus:outline-none w-20" placeholder="Search…" value={friendSearch} onChange={(e) => setFriendSearch(e.target.value)} />
+                  </div>
+                  <button className="text-gray-400 hover:text-white transition-colors p-1 rounded hover:bg-[#3a3d42]" onClick={() => setShowAddFriend((p) => !p)} title="Add friend"><UserPlus size={14} /></button>
+                </div>
+              </div>
+              {showAddFriend && (
+                <div className="mb-3 flex gap-2">
+                  <input className="flex-1 rounded bg-[#1e1f22] px-2 py-1.5 text-sm text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-[#5865f2] border border-[#3a3d42]" placeholder="username" value={addFriendInput} onChange={(e) => setAddFriendInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddFriend()} autoFocus />
+                  <button className="rounded bg-[#5865f2] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#4956d8] disabled:opacity-60 transition-colors flex items-center gap-1" disabled={addFriendLoading || !addFriendInput.trim()} onClick={handleAddFriend}>{addFriendLoading ? <Loader className="animate-spin" size={12} /> : <UserPlus size={12} />}</button>
+                </div>
+              )}
               {friends.length === 0 && <p className="text-sm text-gray-400">No direct contacts yet.</p>}
-              {friends.map((f) => (
+              {friends.filter((f) => !friendSearch || f.username?.toLowerCase().includes(friendSearch.toLowerCase())).map((f) => (
                 <button key={f._id} className="flex w-full items-center gap-3 rounded-lg bg-[#2b2d31] p-3 text-left hover:bg-[#35373c] transition-colors" onClick={() => openDm(f._id)}>
-                  <Avatar user={f} cdn={config.cdnUrl} hover />
+                  <div className="relative shrink-0">
+                    <Avatar user={f} cdn={config.cdnUrl} hover />
+                    <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-[#2b2d31]" style={{ background: getPresenceColor(f.status?.presence) }} />
+                  </div>
                   <div className="min-w-0">
                     <div className="truncate text-sm font-semibold text-white">{f.username}</div>
                     <div className="text-xs text-gray-400 truncate">{f.status?.text || f.status?.presence || 'Offline'}</div>
@@ -1878,16 +2251,19 @@ function AppShell() {
           ) : (
             curMsgs.map((msg, idx) => {
               const prev = idx > 0 ? curMsgs[idx - 1] : null;
+              const newDay = idx === 0 || (prev && dayKey(prev) !== dayKey(msg));
               return (
                 <React.Fragment key={msg._id}>
-                  {(idx === 0 || (prev && dayKey(prev) !== dayKey(msg))) && <DateSep msg={msg} />}
+                  {newDay && <DateSep msg={msg} />}
                   <Message
                     message={msg} users={users} channels={channels} me={auth.userId}
                     onUser={(u, id) => setPeekUser({ ...u, _id: id || u._id })}
                     cdn={config.cdnUrl} onReact={toggleReaction} onReply={setReplyingTo}
                     replyTarget={replyingTo?._id} jumpTo={jumpTo} regRef={regRef}
                     ceById={ceById} reactOpts={reactOpts} openLink={openLink}
-                    onEdit={editMessage} onDelete={deleteMessage} replyMap={replyMsgMap}
+                    onEdit={editMessage} onDelete={requestDeleteMessage}
+                    replyMap={replyMsgMap}
+                    grouped={!newDay && isGroupedWithPrev(msg, prev)}
                   />
                 </React.Fragment>
               );
@@ -1917,11 +2293,19 @@ function AppShell() {
 
           {pendingFiles.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-1">
-              {pendingFiles.map((f, i) => (
-                <button key={`${f.name}-${i}`} className="flex items-center gap-1.5 rounded bg-[#2b2d31] px-2 py-1 text-xs text-gray-200 hover:bg-[#35373c] transition-colors" onClick={() => setPendingFiles((p) => p.filter((_, x) => x !== i))}>
-                  {isImg(f.name, f.type) ? '🖼️' : '📎'} {f.name} <X size={11} className="ml-0.5 opacity-60" />
-                </button>
-              ))}
+              {pendingFiles.map((f, i) => {
+                const isImage = isImg(f.name, f.type);
+                const thumbUrl = isImage ? URL.createObjectURL(f) : null;
+                return (
+                  <div key={`${f.name}-${i}`} className="relative group rounded overflow-hidden border border-[#3a3d42] bg-[#2b2d31]">
+                    {thumbUrl
+                      ? <img src={thumbUrl} alt={f.name} className="h-14 w-20 object-cover" onLoad={() => URL.revokeObjectURL(thumbUrl)} />
+                      : <div className="flex items-center gap-1.5 px-2 py-2 text-xs text-gray-200"><span>📎</span><span className="max-w-[80px] truncate">{f.name}</span></div>
+                    }
+                    <button className="absolute inset-0 grid place-items-center bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => setPendingFiles((p) => p.filter((_, x) => x !== i))}><X size={14} className="text-white" /></button>
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -1972,9 +2356,10 @@ function AppShell() {
                 clearTimeout(sendTypingTimRef.current);
                 sendTypingTimRef.current = setTimeout(sendTypingEnd, 4000);
               }}
+              onPaste={(e) => { const items = Array.from(e.clipboardData?.items ?? []); const imgs = items.filter((it) => it.kind === 'file' && it.type.startsWith('image/')); if (imgs.length) { e.preventDefault(); setPendingFiles((p) => [...p, ...imgs.map((it) => it.getAsFile()).filter(Boolean)]); } }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); clearTimeout(sendTypingTimRef.current); sendMessage(); }
-                if (e.key === 'Escape') { setReplyingTo(null); setInputText(''); sendTypingEnd(); }
+                if (e.key === 'Escape') { setReplyingTo(null); if (!inputText) sendTypingEnd(); }
               }}
               placeholder={selChannel === 'friends' ? 'Select a channel to chat.' : `Message #${curChName}`}
             />
@@ -2002,10 +2387,25 @@ function AppShell() {
           }
         </div>
       </aside>
+      {/* ════ TOASTS ════ */}
+      <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none" aria-live="polite">
+        {toasts.map((t) => (
+          <div key={t.id} className={`pointer-events-auto flex items-center gap-2 rounded-lg px-4 py-3 text-sm text-white shadow-xl animate-[ermineToastIn_200ms_ease-out] ${t.type === 'error' ? 'bg-red-800/90 border border-red-700' : t.type === 'success' ? 'bg-green-800/90 border border-green-700' : 'bg-[#2b2d31]/95 border border-[#4c4f56]'}`}>
+            {t.type === 'error' ? <AlertCircle size={14} className="shrink-0" /> : t.type === 'success' ? <Check size={14} className="shrink-0" /> : <Info size={14} className="shrink-0" />}
+            <span className="max-w-xs">{t.msg}</span>
+            <button className="ml-2 opacity-60 hover:opacity-100 transition-opacity shrink-0" onClick={() => setToasts((p) => p.filter((x) => x.id !== t.id))}><X size={12} /></button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
 export default function App() {
-  return <AppErrorBoundary><AppShell /></AppErrorBoundary>;
+  return (
+    <AppErrorBoundary>
+      <StyleInjector />
+      <AppShell />
+    </AppErrorBoundary>
+  );
 }
