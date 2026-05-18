@@ -42,7 +42,7 @@ const ERMINE_CSS = `
   line-height:1.5; word-break:break-word;
 }
 .unread-dot { box-shadow:0 0 0 2px #2b2d31; }
-\`;
+`;
 
 const StyleInjector = memo(() => {
   useLayoutEffect(() => {
