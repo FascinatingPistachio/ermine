@@ -182,7 +182,7 @@ const joinedAt  = (e) => e?.joined_at || e?.joinedAt || e?.created_at || e?.crea
 
 // ─── Avatar component ─────────────────────────────────────────────────────────
 const uidToHue = (id = '') => { let h = 0; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) & 0xffff; return h % 360; };
-const PRESENCE_COLOR = { Online: '#23a55a', Busy: '#f23f43', Idle: '#f0b232', Focus: '#4f7dff' };
+const PRESENCE_COLOR = { Online: '#3ABF7E', Busy: '#F84848', Idle: '#F39F00', Focus: '#4799F0', Invisible: '#A5A5A5' };
 const getPresenceColor = (p) => PRESENCE_COLOR[p] ?? '#747f8d';
 
 const Avatar = ({ user, cdn, size = 'md', hover = false, always = false }) => {
@@ -488,16 +488,20 @@ const sortRoles  = (rm) => !rm ? [] : Object.entries(rm).map(([id, r]) => ({ id,
 const highRole   = (m, sr) => { if (!m.roles?.length) return null; for (const r of sr) if (m.roles.includes(r.id)) return r; return null; };
 const hoistRole  = (m, sr) => { if (!m.roles?.length) return null; for (const r of sr) if (m.roles.includes(r.id) && r.hoist) return r; return null; };
 
-const organizeMembers = (mems, rolesMap, users) => {
+// organizeMembers: uses _user (pre-enriched at fetch time) NOT users state
+// This keeps the member list stable across presence-only WS updates
+const organizeMembers = (mems, rolesMap) => {
   const sr = sortRoles(rolesMap);
   const gs = {};
   sr.filter((r) => r.hoist).forEach((r) => { gs[r.id] = { id: r.id, name: r.name, color: r.colour, rank: r.rank, members: [] }; });
   gs['Online']  = { id: 'Online',  name: 'Online',  color: null, rank: -1,  members: [] };
   gs['Offline'] = { id: 'Offline', name: 'Offline', color: null, rank: -2, members: [] };
   mems.forEach((m) => {
-    const u = users[m._id.user]; if (!u) return;
+    // Use pre-enriched _user; if missing, stub so member still appears
+    const u = m._user || { _id: m._id?.user, username: m._id?.user?.slice(0, 8) || '?' };
     const hr = hoistRole(m, sr), xr = highRole(m, sr);
-    const off = !u.status || u.status.presence === 'Invisible' || u.status.presence === 'Offline';
+    const presence = u.status?.presence;
+    const off = !presence || presence === 'Invisible' || presence === 'Offline';
     const em = { ...m, user: u, color: xr?.colour || null };
     if (hr && !off) { if (!gs[hr.id]) gs[hr.id] = { id: hr.id, name: hr.name, color: hr.colour, rank: hr.rank, members: [] }; gs[hr.id].members.push(em); }
     else gs[off ? 'Offline' : 'Online'].members.push(em);
@@ -505,7 +509,10 @@ const organizeMembers = (mems, rolesMap, users) => {
   const flat = [];
   Object.values(gs).filter((g) => g.members.length).sort((a, b) => b.rank - a.rank).forEach((g) => {
     flat.push({ type: 'header', key: `h-${g.id}`, name: g.name, count: g.members.length });
-    [...g.members].sort((a, b) => (a.nickname || a.user?.username || '').localeCompare(b.nickname || b.user?.username || '')).forEach((m) => flat.push({ type: 'member', key: m._id.user, data: m }));
+    // Stoat sort: nickname ?? display_name ?? username, localeCompare
+    [...g.members]
+      .sort((a, b) => (a.nickname ?? a.user?.display_name ?? a.user?.username ?? '').localeCompare(b.nickname ?? b.user?.display_name ?? b.user?.username ?? ''))
+      .forEach((m) => flat.push({ type: 'member', key: m._id.user, data: m }));
   });
   return flat;
 };
@@ -553,11 +560,11 @@ const toReactions = (r) => !r || typeof r !== 'object' ? [] : Object.entries(r).
 const replyId = (m) => { const r = Array.isArray(m?.replies) ? m.replies[0] : null; return typeof r === 'string' ? r : r?.id || r?._id || null; };
 
 // ─── Message ──────────────────────────────────────────────────────────────────
-const Message = memo(({
+const Message = memo(function Message({
   message, users, channels, me, onUser, cdn, onReact, onReply,
   replyTarget, jumpTo, regRef, ceById, reactOpts, openLink,
   onEdit, onDelete, replyMap, grouped,
-}) => {
+}) {
   // Masquerade support: bots can override display name/avatar/colour
   const masq    = message.masquerade;
   const authorId = typeof message.author === 'string' ? message.author : message.author?._id;
@@ -755,6 +762,49 @@ const Message = memo(({
   );
 });
 
+// Custom comparison: only re-render Message on content/reactions/reply changes, not unrelated state
+const MemoMessage = memo(Message, (prev, next) =>
+  prev.message._id       === next.message._id &&
+  prev.message.content   === next.message.content &&
+  prev.message.edited    === next.message.edited &&
+  prev.message.reactions === next.message.reactions &&
+  prev.message.attachments === next.message.attachments &&
+  prev.grouped           === next.grouped &&
+  prev.replyTarget       === next.replyTarget &&
+  prev.me                === next.me &&
+  prev.cdn               === next.cdn
+);
+
+// ─── EmptyFriends placeholder ────────────────────────────────────────────────
+const EmptyFriends = ({ msg }) => (
+  <div className="flex flex-col items-center justify-center py-16 text-center">
+    <div className="text-6xl mb-4">🦦</div>
+    <p className="text-[#80848e] text-[15px]">{msg}</p>
+  </div>
+);
+
+// ─── FriendRow ────────────────────────────────────────────────────────────────
+const FriendRow = ({ f, cdn, channels, userId, unreadChannels, openDm, removeFriend, blockUser, setPeekUser, getPresenceColor }) => {
+  const dmCh = Object.values(channels).find((c) => c.channel_type === 'DirectMessage' && (c.recipients || []).includes(f._id));
+  const unread = unreadChannels.has(dmCh?._id || '');
+  return (
+    <div className="flex items-center gap-3 rounded-lg p-3 hover:bg-[#35373c] group transition-colors cursor-pointer" onClick={() => openDm(f._id)}>
+      <div className="relative shrink-0">
+        <Avatar user={f} cdn={cdn} hover />
+        <span className="absolute -bottom-px -right-px w-3.5 h-3.5 rounded-full border-2 border-[#313338]" style={{ background: getPresenceColor(f.status?.presence) }} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-[14px] font-semibold text-[#f2f3f5] truncate">{f.display_name || f.username}</div>
+        <div className="text-[12px] text-[#80848e] truncate">{f.status?.text || f.status?.presence || 'Offline'}</div>
+      </div>
+      {unread && <span className="w-2.5 h-2.5 rounded-full bg-[#f2f3f5] shrink-0" />}
+      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button className="p-2 rounded-full bg-[#1e1f22] hover:bg-[#5865f2] text-[#80848e] hover:text-white transition-colors" onClick={(e) => { e.stopPropagation(); const live = f; setPeekUser(live); }} title="View Profile"><Info size={16} /></button>
+        <button className="p-2 rounded-full bg-[#1e1f22] hover:bg-[#f23f43] text-[#80848e] hover:text-white transition-colors" onClick={(e) => { e.stopPropagation(); removeFriend(f._id); }} title="Remove Friend"><UserX size={16} /></button>
+      </div>
+    </div>
+  );
+};
 
 // ─── User Settings Panel ──────────────────────────────────────────────────────
 const UserSettingsPanel = ({ user, cdn, apiUrl, token, onUpdate, addToast, isLowSpec, openStatusEditor }) => {
@@ -1068,27 +1118,37 @@ function AppShell() {
     upsertUsers(em);
   }, [upsertUsers]);
 
+  // MemberPresenceDot: reads from usersRef live without causing list re-render
+  const MemberPresenceDot = useCallback(({ userId }) => {
+    const u = usersRef.current[userId];
+    const col = getPresenceColor(u?.status?.presence);
+    return <span className="absolute -bottom-px -right-px w-3 h-3 rounded-full border-2 border-[#2b2d31]" style={{ background: col }} />;
+  }, []);  // usersRef is a ref, stable
+
   const renderMemberItem = useCallback((item) => {
     if (item.type === 'header') return (
-      <div className="flex items-center px-3 text-[11px] font-bold uppercase tracking-widest text-[#80848e] h-full">
+      <div className="flex items-center px-3 pt-5 pb-1 text-[11px] font-bold uppercase tracking-widest text-[#80848e] h-full">
         {item.name} — {item.count}
       </div>
     );
     const m = item.data;
-    const mu = m.user || { _id: m?._id?.user, username: 'Loading…' };
+    const mu = m.user || { _id: m?._id?.user, username: '…' };
+    const userId = mu._id || m._id?.user;
+    const displayName = m.nickname || mu.display_name || mu.username || '…';
+    const statusText = mu.status?.text || mu.status?.presence || '';
     return (
-      <button className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-[#35373c] h-full" onClick={() => setPeekUser({ ...mu, _id: mu._id || m._id.user })}>
-        <Avatar user={mu} cdn={config.cdnUrl} size="sm" hover />
+      <button className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-[#35373c] h-full transition-colors" onClick={() => { const live = usersRef.current[userId] || mu; setPeekUser({ ...live, _id: userId }); }}>
+        <div className="relative shrink-0">
+          <Avatar user={mu} cdn={config.cdnUrl} size="sm" hover />
+          <MemberPresenceDot userId={userId} />
+        </div>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium" style={{ color: m.color || '#f2f3f5' }}>{m.nickname || mu.username}</div>
-          {mu._loading
-            ? <div className="mt-0.5 h-1.5 w-16 rounded-full bg-[#242A35] overflow-hidden"><div className="h-full w-1/2 animate-pulse rounded-full bg-[#8AB4F8]" /></div>
-            : <div className="flex items-center gap-1 text-[11px] text-gray-500"><span className={`w-1.5 h-1.5 rounded-full inline-block shrink-0 ${mu.status?.presence === 'Online' ? 'bg-[#3ba55d]' : mu.status?.presence === 'Busy' ? 'bg-[#ed4245]' : mu.status?.presence === 'Idle' ? 'bg-[#f0b232]' : 'bg-gray-500'}`} />{mu.status?.text || mu.status?.presence || 'Offline'}</div>
-          }
+          <div className="truncate text-[13px] font-medium leading-tight" style={{ color: m.color || '#f2f3f5' }}>{displayName}</div>
+          {statusText && <div className="text-[11px] text-[#80848e] truncate leading-tight mt-0.5">{statusText}</div>}
         </div>
       </button>
     );
-  }, [config.cdnUrl]);
+  }, [config.cdnUrl, MemberPresenceDot]);
 
   // ── Fetch helpers ──
   const fetchMembers = useCallback(async (serverId) => {
@@ -1098,13 +1158,21 @@ function AppShell() {
       const res = await fetch(`${config.apiUrl}/servers/${serverId}/members`, { headers: { 'x-session-token': auth.token } });
       if (!res.ok) return;
       const data = await res.json();
-      upsertUsers(data.users || []);
+      const userList = data.users || [];
       const pm = data.members || [];
-      for (let i = 0; i < pm.length; i += MEMBER_CHUNK) {
-        if (membLoadIdRef.current !== lid) break;
-        const chunk = pm.slice(i, i + MEMBER_CHUNK);
-        setMembers((p) => { const n = { ...p }; chunk.forEach((m) => { n[`${m._id.server}:${m._id.user}`] = m; }); return n; });
-        if (i + MEMBER_CHUNK < pm.length) await new Promise((r) => setTimeout(r, 0));
+      // Build a quick user lookup from the response so we can enrich members immediately
+      const userMap = {};
+      userList.forEach((u) => { if (u?._id) userMap[u._id] = u; });
+      // Enrich members with user display info at fetch time
+      const enriched = pm.map((m) => ({ ...m, _user: userMap[m._id.user] ?? null }));
+      // Single setState call — no chunked re-renders
+      if (membLoadIdRef.current === lid) {
+        upsertUsers(userList);
+        setMembers((p) => {
+          const n = { ...p };
+          enriched.forEach((m) => { n[`${m._id.server}:${m._id.user}`] = m; });
+          return n;
+        });
       }
     } catch {} finally { if (membLoadIdRef.current === lid) setIsMembLoading(false); }
   }, [auth.token, config.apiUrl, upsertUsers]);
@@ -1188,7 +1256,7 @@ function AppShell() {
   // ── Derived state ──
   const serverList   = useMemo(() => Object.values(servers), [servers]);
   const dmChannels   = useMemo(() => Object.values(channels).filter((c) => c?.channel_type === 'DirectMessage' || c?.channel_type === 'Group' || c?.channel_type === 'SavedMessages'), [channels]);
-  const curMsgs      = useMemo(() => uniq(messages[selChannel] || []), [messages, selChannel]);
+  const curMsgs      = useMemo(() => messages[selChannel] || [], [messages, selChannel]);
   const curMsgMap    = useMemo(() => Object.fromEntries(curMsgs.map((m) => [m._id, m])), [curMsgs]);
   const replyMsgMap  = useMemo(() => ({ ...curMsgMap, ...replyCacheRef.current }), [curMsgMap]);
   const activeReply  = useMemo(() => replyingTo ? curMsgMap[replyingTo._id] || replyingTo : null, [replyingTo, curMsgMap]);
@@ -1211,13 +1279,19 @@ function AppShell() {
   const selServerObj = servers[selServer];
   const isOwner = selServerObj?.owner === auth.userId;
 
+  // KEY FIX: remove `users` from deps — organizeMembers now uses pre-enriched _user
+  // Member list only re-computes when members join/leave or roles change, NOT on presence updates
   const memberListItems = useMemo(() =>
-    selServer === '@me' || !selServerObj ? [] : organizeMembers(allMembers, selServerObj.roles || {}, users),
-    [allMembers, selServerObj, users, selServer]
+    selServer === '@me' || !selServerObj ? [] : organizeMembers(allMembers, selServerObj.roles || {}),
+    [allMembers, selServerObj, selServer]  // no `users` dep!
   );
 
   // Friends: users with relationship Friend (1)
-  const friends = useMemo(() => Object.values(users).filter((u) => u.relationship === 'Friend' || u.relationship === 1), [users]);
+  const friends   = useMemo(() => Object.values(users).filter((u) => u.relationship === 'Friend'),   [users]);
+  const incoming  = useMemo(() => Object.values(users).filter((u) => u.relationship === 'Incoming'),  [users]);
+  const outgoing  = useMemo(() => Object.values(users).filter((u) => u.relationship === 'Outgoing'),  [users]);
+  const blocked   = useMemo(() => Object.values(users).filter((u) => u.relationship === 'Blocked'),   [users]);
+  const [friendTab, setFriendTab] = useState('online'); // 'online'|'all'|'pending'|'blocked'
 
   // ── Custom emoji ──
   const allCE = useMemo(() => {
@@ -1454,12 +1528,30 @@ function AppShell() {
         break;
       case 'ServerMemberUpdate': {
         const k = `${packet.id.server}:${packet.id.user}`;
-        setMembers((p) => ({ ...p, [k]: clearFields({ ...p[k], _id: packet.id, ...packet.data }, packet.clear) }));
+        setMembers((p) => {
+          const existing = p[k] || {};
+          const updated = clearFields({ ...existing, _id: packet.id, ...packet.data }, packet.clear);
+          // Preserve _user if already enriched
+          if (!updated._user && existing._user) updated._user = existing._user;
+          return { ...p, [k]: updated };
+        });
         break;
       }
       case 'ServerMemberJoin': setMembers((p) => ({ ...p, [`${packet.id}:${packet.user}`]: { ...packet.member, _id: { server: packet.id, user: packet.user } } })); break;
       case 'ServerMemberLeave': setMembers((p) => { const n = { ...p }; delete n[`${packet.id}:${packet.user}`]; return n; }); break;
-      case 'UserUpdate': setUsers((p) => ({ ...p, [packet.id]: clearFields({ ...p[packet.id], ...packet.data }, packet.clear) })); break;
+      case 'UserUpdate': {
+        const updatedUser = clearFields({ ...usersRef.current[packet.id], ...packet.data }, packet.clear);
+        setUsers((p) => ({ ...p, [packet.id]: updatedUser }));
+        // Keep _user in member objects in sync for presence categorization
+        setMembers((p) => {
+          const keys = Object.keys(p).filter((k) => k.endsWith(`:${packet.id}`));
+          if (!keys.length) return p;
+          const n = { ...p };
+          keys.forEach((k) => { if (n[k]._user) n[k] = { ...n[k], _user: updatedUser }; });
+          return n;
+        });
+        break;
+      }
       case 'UserRelationship': setUsers((p) => ({ ...p, [packet.user._id]: packet.user })); break;
       default: break;
     }
@@ -1791,6 +1883,33 @@ function AppShell() {
   const removeFriend = async (userId) => {
     try { const r = await fetch(`${config.apiUrl}/users/${userId}/friend`, { method: 'DELETE', headers: { 'x-session-token': auth.token } }); if (!r.ok) throw new Error('Failed'); const d = await r.json(); if (d?._id) upsertUsers([d]); }
     catch {}
+  };
+
+  const acceptFriend = async (userId) => {
+    try {
+      const r = await fetch(`${config.apiUrl}/users/${userId}/friend`, { method: 'PUT', headers: { 'x-session-token': auth.token } });
+      if (!r.ok) throw new Error('Failed'); const d = await r.json(); if (d?._id) upsertUsers([d]);
+      addToast('Friend request accepted!', 'success');
+    } catch (err) { addToast(err.message, 'error'); }
+  };
+  const declineFriend = async (userId) => {
+    try {
+      const r = await fetch(`${config.apiUrl}/users/${userId}/friend`, { method: 'DELETE', headers: { 'x-session-token': auth.token } });
+      if (!r.ok) throw new Error('Failed'); const d = await r.json(); if (d?._id) upsertUsers([d]);
+    } catch {}
+  };
+  const blockUser = async (userId) => {
+    try {
+      const r = await fetch(`${config.apiUrl}/users/${userId}/block`, { method: 'PUT', headers: { 'x-session-token': auth.token } });
+      if (!r.ok) throw new Error('Failed'); const d = await r.json(); if (d?._id) upsertUsers([d]);
+      addToast('User blocked.', 'info');
+    } catch {}
+  };
+  const unblockUser = async (userId) => {
+    try {
+      const r = await fetch(`${config.apiUrl}/users/${userId}/block`, { method: 'DELETE', headers: { 'x-session-token': auth.token } });
+      if (!r.ok) throw new Error('Failed'); const d = await r.json(); if (d?._id) upsertUsers([d]);
+    } catch {}
   };
 
   const handleAddFriend = async () => {
@@ -2243,37 +2362,87 @@ function AppShell() {
           )}
 
           {selChannel === 'friends' ? (
-            <div className="space-y-1.5 p-4">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-xs font-bold uppercase tracking-wide text-gray-400">Direct ({friends.length})</h2>
-                <div className="flex items-center gap-1">
-                  <div className="flex items-center gap-1.5 rounded bg-[#1e1f22] px-2 py-1">
-                    <Search size={11} className="text-gray-500" />
-                    <input className="bg-transparent text-xs text-gray-200 placeholder:text-gray-500 focus:outline-none w-20" placeholder="Search…" value={friendSearch} onChange={(e) => setFriendSearch(e.target.value)} />
-                  </div>
-                  <button className="text-gray-400 hover:text-white transition-colors p-1 rounded hover:bg-[#3a3d42]" onClick={() => setShowAddFriend((p) => !p)} title="Add friend"><UserPlus size={14} /></button>
+            <div className="flex flex-col h-full overflow-hidden">
+              {/* Friends header bar */}
+              <div className="flex items-center gap-2 border-b border-[#1e1f22] px-4 h-12 bg-[#313338] shrink-0">
+                <Users size={18} className="text-[#80848e]" />
+                <span className="text-[15px] font-bold text-[#f2f3f5] mr-2">Friends</span>
+                {[
+                  { id: 'online',  label: 'Online' },
+                  { id: 'all',     label: 'All' },
+                  { id: 'pending', label: incoming.length ? `Pending · ${incoming.length}` : 'Pending' },
+                  { id: 'blocked', label: 'Blocked' },
+                ].map((t) => (
+                  <button key={t.id} className={`px-3 py-1 rounded text-[13px] font-medium transition-colors ${friendTab === t.id ? 'bg-[#404249] text-[#f2f3f5]' : 'text-[#80848e] hover:bg-[#35373c] hover:text-[#b5bac1]'}`} onClick={() => setFriendTab(t.id)}>{t.label}</button>
+                ))}
+                <div className="ml-auto">
+                  <button className="flex items-center gap-1.5 rounded bg-[#23a55a] px-3 py-1.5 text-[13px] font-semibold text-white hover:bg-[#1e8c4b] transition-colors" onClick={() => setShowAddFriend((p) => !p)}><UserPlus size={14} /> Add Friend</button>
                 </div>
               </div>
+              {/* Add friend input */}
               {showAddFriend && (
-                <div className="mb-3 flex gap-2">
-                  <input className="flex-1 rounded bg-[#1e1f22] px-2 py-1.5 text-sm text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-[#5865f2] border border-[#3a3d42]" placeholder="username" value={addFriendInput} onChange={(e) => setAddFriendInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddFriend()} autoFocus />
-                  <button className="rounded bg-[#5865f2] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#4956d8] disabled:opacity-60 transition-colors flex items-center gap-1" disabled={addFriendLoading || !addFriendInput.trim()} onClick={handleAddFriend}>{addFriendLoading ? <Loader className="animate-spin" size={12} /> : <UserPlus size={12} />}</button>
+                <div className="px-4 py-3 border-b border-[#1e1f22] bg-[#2b2d31] shrink-0">
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-[#80848e] mb-2">Add a Friend</p>
+                  <div className="flex gap-2">
+                    <input className="flex-1 rounded-lg bg-[#1e1f22] px-3 py-2 text-[15px] text-[#f2f3f5] placeholder:text-[#4f5660] focus:outline-none focus:ring-1 focus:ring-[#5865f2]" placeholder="Enter a username" value={addFriendInput} onChange={(e) => setAddFriendInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddFriend()} autoFocus />
+                    <button className="rounded-lg bg-[#5865f2] px-4 py-2 text-[13px] font-semibold text-white hover:bg-[#4752c4] disabled:opacity-60 transition-colors" disabled={addFriendLoading || !addFriendInput.trim()} onClick={handleAddFriend}>{addFriendLoading ? 'Sending…' : 'Send Request'}</button>
+                  </div>
                 </div>
               )}
-              {friends.length === 0 && <p className="text-sm text-gray-400">No direct contacts yet.</p>}
-              {friends.filter((f) => !friendSearch || f.username?.toLowerCase().includes(friendSearch.toLowerCase())).map((f) => (
-                <button key={f._id} className="flex w-full items-center gap-3 rounded-lg bg-[#2b2d31] p-3 text-left hover:bg-[#35373c] transition-colors" onClick={() => openDm(f._id)}>
-                  <div className="relative shrink-0">
-                    <Avatar user={f} cdn={config.cdnUrl} hover />
-                    <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-[#2b2d31]" style={{ background: getPresenceColor(f.status?.presence) }} />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold text-white">{f.username}</div>
-                    <div className="text-xs text-gray-400 truncate">{f.status?.text || f.status?.presence || 'Offline'}</div>
-                  </div>
-                  {unreadChannels.has(Object.values(channels).find((c) => c.channel_type === 'DirectMessage' && (c.recipients || []).includes(f._id))?._id || '') && <span className="ml-auto unread-dot w-2 h-2 rounded-full bg-white shrink-0" />}
-                </button>
-              ))}
+              {/* List body */}
+              <div className="flex-1 overflow-y-auto px-4 pt-4 pb-2">
+                <div className="flex items-center gap-2 rounded-lg bg-[#1e1f22] px-3 py-2 mb-4">
+                  <Search size={14} className="text-[#80848e] shrink-0" />
+                  <input className="flex-1 bg-transparent text-[14px] text-[#f2f3f5] placeholder:text-[#80848e] focus:outline-none" placeholder="Search" value={friendSearch} onChange={(e) => setFriendSearch(e.target.value)} />
+                </div>
+                {(() => {
+                  const fq = friendSearch.toLowerCase();
+                  const fn = (u) => !fq || (u.username||'').toLowerCase().includes(fq)||(u.display_name||'').toLowerCase().includes(fq);
+                  if (friendTab === 'online') {
+                    const list = friends.filter((f) => f.status?.presence && f.status.presence !== 'Invisible' && fn(f));
+                    return list.length ? list.map((f) => <FriendRow key={f._id} f={f} cdn={config.cdnUrl} channels={channels} unreadChannels={unreadChannels} openDm={openDm} removeFriend={removeFriend} blockUser={blockUser} setPeekUser={setPeekUser} getPresenceColor={getPresenceColor} />) : <EmptyFriends msg="No online friends right now." />;
+                  }
+                  if (friendTab === 'all') {
+                    const list = friends.filter(fn);
+                    return list.length ? list.map((f) => <FriendRow key={f._id} f={f} cdn={config.cdnUrl} channels={channels} unreadChannels={unreadChannels} openDm={openDm} removeFriend={removeFriend} blockUser={blockUser} setPeekUser={setPeekUser} getPresenceColor={getPresenceColor} />) : <EmptyFriends msg="No friends yet. Add someone!" />;
+                  }
+                  if (friendTab === 'pending') {
+                    const inc = incoming.filter(fn); const out = outgoing.filter(fn);
+                    return (
+                      <div className="space-y-1">
+                        {inc.length > 0 && <p className="text-[11px] font-bold uppercase tracking-widest text-[#80848e] mb-2">Incoming — {inc.length}</p>}
+                        {inc.map((f) => (
+                          <div key={f._id} className="flex items-center gap-3 rounded-lg p-3 hover:bg-[#35373c]">
+                            <Avatar user={f} cdn={config.cdnUrl} />
+                            <div className="min-w-0 flex-1"><div className="text-[14px] font-semibold text-[#f2f3f5]">{f.display_name||f.username}</div><div className="text-[12px] text-[#80848e]">Incoming Friend Request</div></div>
+                            <button className="p-2 rounded-full bg-[#35373c] hover:bg-[#23a55a] text-[#b5bac1] hover:text-white transition-colors" onClick={() => acceptFriend(f._id)}><Check size={16} /></button>
+                            <button className="p-2 rounded-full bg-[#35373c] hover:bg-[#f23f43] text-[#b5bac1] hover:text-white transition-colors" onClick={() => declineFriend(f._id)}><X size={16} /></button>
+                          </div>
+                        ))}
+                        {out.length > 0 && <p className="text-[11px] font-bold uppercase tracking-widest text-[#80848e] mt-4 mb-2">Outgoing — {out.length}</p>}
+                        {out.map((f) => (
+                          <div key={f._id} className="flex items-center gap-3 rounded-lg p-3 hover:bg-[#35373c]">
+                            <Avatar user={f} cdn={config.cdnUrl} />
+                            <div className="min-w-0 flex-1"><div className="text-[14px] font-semibold text-[#f2f3f5]">{f.display_name||f.username}</div><div className="text-[12px] text-[#80848e]">Outgoing Friend Request</div></div>
+                            <button className="p-2 rounded-full bg-[#35373c] hover:bg-[#f23f43] text-[#b5bac1] hover:text-white transition-colors" onClick={() => declineFriend(f._id)}><X size={16} /></button>
+                          </div>
+                        ))}
+                        {inc.length === 0 && out.length === 0 && <EmptyFriends msg="No pending requests." />}
+                      </div>
+                    );
+                  }
+                  if (friendTab === 'blocked') {
+                    const list = blocked.filter(fn);
+                    return list.length ? list.map((f) => (
+                      <div key={f._id} className="flex items-center gap-3 rounded-lg p-3 hover:bg-[#35373c]">
+                        <Avatar user={f} cdn={config.cdnUrl} />
+                        <div className="min-w-0 flex-1"><div className="text-[14px] font-semibold text-[#f2f3f5]">{f.display_name||f.username}</div><div className="text-[12px] text-[#80848e]">Blocked</div></div>
+                        <button className="px-3 py-1.5 rounded bg-[#35373c] text-[13px] text-[#b5bac1] hover:bg-[#f23f43] hover:text-white transition-colors" onClick={() => unblockUser(f._id)}>Unblock</button>
+                      </div>
+                    )) : <EmptyFriends msg="No blocked users." />;
+                  }
+                })()}
+              </div>
             </div>
           ) : curMsgs.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center p-8">
@@ -2288,7 +2457,7 @@ function AppShell() {
               return (
                 <React.Fragment key={msg._id}>
                   {newDay && <DateSep msg={msg} />}
-                  <Message
+                  <MemoMessage
                     message={msg} users={users} channels={channels} me={auth.userId}
                     onUser={(u, id) => setPeekUser({ ...u, _id: id || u._id })}
                     cdn={config.cdnUrl} onReact={toggleReaction} onReply={setReplyingTo}
@@ -2409,13 +2578,26 @@ function AppShell() {
 
       {/* ════ MEMBERS SIDEBAR ════ */}
       <aside className="hidden w-[240px] flex-col bg-[#2b2d31] lg:flex shrink-0">
-        <div className="px-3 pt-4 pb-0 shrink-0">
-          {isMembLoading && <div className="mb-2 h-0.5 w-full overflow-hidden rounded-full bg-[#1e1f22]"><div className="h-full w-1/2 animate-pulse rounded-full bg-[#5865f2]" /></div>}
+        <div className="px-3 pt-3 pb-0 shrink-0">
+          {isMembLoading
+            ? <div className="flex items-center gap-2 text-[11px] text-[#80848e] mb-2"><Loader className="animate-spin" size={10} /> Loading members…</div>
+            : selServer !== '@me' && allMembers.length > 0 && (
+              <div className="flex items-center gap-1.5 text-[11px] text-[#80848e] mb-2">
+                <span className="w-2 h-2 rounded-full bg-[#3ABF7E] inline-block" />
+                {allMembers.filter((m) => { const u = usersRef.current[m._id?.user]; return u?.status?.presence && u.status.presence !== 'Invisible'; }).length} online
+              </div>
+            )
+          }
         </div>
         <div className="min-h-0 flex-1">
           {selServer === '@me'
-            ? <p className="p-4 text-xs text-gray-400">Member list available in spaces.</p>
-            : <MemberVirtualList items={memberListItems} className="h-full w-full" renderItem={renderMemberItem} />
+            ? <div className="p-4 text-center">
+                <div className="text-4xl mb-2">🦦</div>
+                <p className="text-[12px] text-[#80848e]">Member list available in spaces.</p>
+              </div>
+            : memberListItems.length === 0 && !isMembLoading
+              ? <p className="p-4 text-[12px] text-[#80848e]">No members loaded.</p>
+              : <MemberVirtualList items={memberListItems} className="h-full w-full" renderItem={renderMemberItem} />
           }
         </div>
       </aside>
