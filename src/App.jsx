@@ -24,6 +24,13 @@ const IM = typeof import.meta !== 'undefined' ? import.meta.env : {};
 // On Vercel the /stoat-api proxy bypasses CORS entirely.
 // Locally (dev) hit the stoat API directly.
 const IS_DEV = typeof location !== 'undefined' && (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
+// Normalize an API URL: on production, always route stoat API through Vercel proxy
+const normalizeApi = (url) => {
+  if (!url || IS_DEV) return url || DEF.api;
+  // If old cookie points directly at stoat, swap to proxy path
+  if (url === 'https://api.stoat.chat' || url === 'https://stoat.chat/api' || url.includes('stoat.chat/api') || url.includes('api.stoat.chat')) return '/stoat-api';
+  return url;
+};
 const DEF = {
   api: IM?.VITE_STOAT_API_URL || (IS_DEV ? 'https://api.stoat.chat' : '/stoat-api'),
   ws:  IM?.VITE_STOAT_WS_URL  || 'wss://stoat.chat/events',
@@ -550,7 +557,7 @@ const UserSettingsPanel=({user,cdn,apiUrl,token,onUpdate,addToast,isLowSpec,open
           <div className="border-t border-[#1e1f22] pt-4"><div className="text-xs font-bold uppercase tracking-widest text-[#80848e] mb-3">Change Password</div><div className="space-y-2">{[['Current',pwCur,setPwCur,'current-password'],['New',pwNew,setPwNew,'new-password'],['Confirm',pwConf,setPwConf,'new-password']].map(([l,v,s,ac])=><div key={l}><label className="text-xs text-[#80848e] block mb-0.5">{l}</label><input className={inp} type="password" value={v} onChange={e=>s(e.target.value)} autoComplete={ac}/></div>)}</div><button className="mt-3 rounded-md bg-[#5865f2] px-4 py-2 text-sm font-bold text-white hover:bg-[#4752c4] disabled:opacity-60 transition-colors" disabled={pwS||!pwCur||!pwNew} onClick={changePw}>{pwS?'Saving…':'Change Password'}</button></div>
         </div>}
         {tab==='about'&&<div className="space-y-4">
-          <div className="flex items-start gap-3 rounded-lg bg-[#2b2d31] p-3"><img src="/ermine-logo.png" alt="Ermine" className="w-10 h-10 rounded-xl shrink-0"/><div><div className="text-sm font-bold text-white">Ermine v0.6.0</div><div className="text-xs text-[#80848e] mt-0.5">A refined client for stoat.chat</div><div className="text-xs text-[#80848e]">Mode: {isLowSpec?'Lite':'Standard'}</div><a href="https://ko-fi.com/stoatchat" target="_blank" rel="noopener noreferrer" className="text-xs text-[#5865f2] hover:underline mt-1 inline-block">Support Stoat →</a></div></div>
+          <div className="flex items-start gap-3 rounded-lg bg-[#2b2d31] p-3"><img src="/ermine-logo.png" alt="Ermine" className="w-10 h-10 rounded-xl shrink-0"/><div><div className="text-sm font-bold text-white">Ermine v0.7.0</div><div className="text-xs text-[#80848e] mt-0.5">A refined client for stoat.chat</div><div className="text-xs text-[#80848e]">Mode: {isLowSpec?'Lite':'Standard'}</div><a href="https://ko-fi.com/stoatchat" target="_blank" rel="noopener noreferrer" className="text-xs text-[#5865f2] hover:underline mt-1 inline-block">Support Stoat →</a></div></div>
           <div className="text-xs text-[#80848e] rounded-lg bg-[#1e1f22] p-3 leading-relaxed"><p>Ermine is an experimental client for stoat.chat. Credentials stored only in browser cookies, never outside configured endpoints.</p></div>
         </div>}
       </div>
@@ -665,10 +672,20 @@ function AppShell() {
   const upsertFromMsgs=useCallback((msgs=[])=>{const u=[];msgs.forEach(m=>{if(m?.author&&typeof m.author==='object'&&m.author._id)u.push(m.author);if(m?.user?._id)u.push(m.user);});upsertUsers(u);},[upsertUsers]);
 
   const fetchMissingUsers=useCallback(async(msgs=[])=>{
-    if(!canFetchU.current)return;
-    const need=new Set();msgs.forEach(m=>{const aid=typeof m?.author==='string'?m.author:m?.author?._id;if(aid&&aid!=='00000000000000000000000000'&&!usersRef.current[aid]&&!pendUsersRef.current.has(aid))need.add(aid);});
-    if(!need.size)return;const ids=[...need].slice(0,8);ids.forEach(id=>pendUsersRef.current.add(id));
-    await Promise.all(ids.map(async uid=>{try{const r=await fetch(`${cfg.api}/users/${uid}`,{headers:{'x-session-token':auth.token}});if(!r.ok){if([401,403,405].includes(r.status))canFetchU.current=false;return;}const d=await r.json();if(d?._id)upsertUsers([d]);}catch(e){if(/Failed to fetch|CORS/.test(e?.message||''))canFetchU.current=false;}finally{pendUsersRef.current.delete(uid);}}));
+    // canFetchU: if false, has a timestamp — wait 30s before retrying (not permanent)
+    if(canFetchU.current!==true){if(typeof canFetchU.current==='number'&&Date.now()-canFetchU.current<30000)return;canFetchU.current=true;}
+    const need=new Set();
+    msgs.forEach(m=>{const aid=typeof m?.author==='string'?m.author:m?.author?._id;if(aid&&aid!=='00000000000000000000000000'&&!usersRef.current[aid]&&!pendUsersRef.current.has(aid))need.add(aid);});
+    if(!need.size)return;
+    const ids=[...need].slice(0,8);ids.forEach(id=>pendUsersRef.current.add(id));
+    await Promise.all(ids.map(async uid=>{
+      try{
+        const r=await fetch(`${cfg.api}/users/${uid}`,{headers:{'x-session-token':auth.token}});
+        if(!r.ok){if(r.status===401)canFetchU.current=Date.now();return;}
+        const d=await r.json();if(d?._id)upsertUsers([d]);
+      }catch{/* CORS/network - set cooldown not permanent disable */canFetchU.current=Date.now();}
+      finally{pendUsersRef.current.delete(uid);}
+    }));
   },[auth.token,cfg.api,upsertUsers]);
 
   const fetchMembers=useCallback(async(serverId)=>{
@@ -727,11 +744,21 @@ function AppShell() {
 
   const curTypingIds=useMemo(()=>{const s=typing[selChannel];return s?[...s].filter(id=>id!==auth.uid):[];},[typing,selChannel,auth.uid]);
 
-  // Fetch full profile when user peek opens
+  // Fetch full profile (banner/bio) and full user data when peek opens
   useEffect(()=>{
     if(!peekUser?._id)return;
     setPeekProfile(null);
+    // Fetch banner/bio
     fetchProfile(peekUser._id).then(p=>setPeekProfile(p||null));
+    // Fetch full user data if we only have a stub (unknown/missing username or avatar)
+    const existing=usersRef.current[peekUser._id];
+    const isStub=!existing?.username||existing.username===peekUser._id?.slice(0,8)||!existing?.discriminator;
+    if(isStub&&auth.token){
+      fetch(`${cfg.api}/users/${peekUser._id}`,{headers:{'x-session-token':auth.token}})
+        .then(r=>r.ok?r.json():null)
+        .then(d=>{if(d?._id){upsertUsers([d]);setPeekUser(prev=>prev?._id===d._id?{...prev,...d}:prev);}})
+        .catch(()=>{});
+    }
   },[peekUser?._id]); // eslint-disable-line
 
   const peekMember=useMemo(()=>!peekUser?._id||selServer==='@me'?null:members[`${selServer}:${peekUser._id}`],[members,peekUser,selServer]);
@@ -756,7 +783,7 @@ function AppShell() {
   // ── WS ─────────────────────────────────────────────────────────────────────
   const discoverCfg=async(apiUrl)=>{try{const r=await fetch(apiUrl,{headers:{Accept:'application/json'}});if(!r.ok)return;const d=await r.json();setCfg(p=>({...p,ws:d.ws||p.ws,cdn:d.features?.autumn?.url||p.cdn}));}catch{}};
 
-  useEffect(()=>{const tk=gc('ermine_token')||localStorage.getItem('stoat_token');const uk=gc('ermine_uid')||localStorage.getItem('stoat_user_id');const ak=gc('ermine_api')||localStorage.getItem('stoat_api_url');const api=ak||DEF.api;setCfg(p=>({...p,api}));discoverCfg(api);if(tk&&uk){setAuth({token:tk,uid:uk});setView('app');}else setView('login');},[]);// eslint-disable-line
+  useEffect(()=>{const tk=gc('ermine_token')||localStorage.getItem('stoat_token');const uk=gc('ermine_uid')||localStorage.getItem('stoat_user_id');const ak=gc('ermine_api')||localStorage.getItem('stoat_api_url');const api=normalizeApi(ak)||DEF.api;setCfg(p=>({...p,api}));discoverCfg(api);if(tk&&uk){setAuth({token:tk,uid:uk});setView('app');}else setView('login');},[]);// eslint-disable-line
 
   const sendTypingBegin=useCallback(()=>{const ws=wsRef.current;if(!ws||ws.readyState!==WebSocket.OPEN||!selChannel||selChannel==='friends')return;const now=Date.now();if(now-lastTypRef.current<2500)return;lastTypRef.current=now;ws.send(JSON.stringify({type:'BeginTyping',channel:selChannel}));},[selChannel]);
   const sendTypingEnd=useCallback(()=>{const ws=wsRef.current;if(!ws||ws.readyState!==WebSocket.OPEN||!selChannel)return;ws.send(JSON.stringify({type:'EndTyping',channel:selChannel}));lastTypRef.current=0;},[selChannel]);
@@ -812,7 +839,7 @@ function AppShell() {
     setStatus('connecting');if(wsRef.current)wsRef.current.close();if(wsReconTim.current){clearTimeout(wsReconTim.current);wsReconTim.current=null;}
     let dead=false;const ws=new WebSocket(wsUrl);wsRef.current=ws;
     ws.onerror=()=>setStatus('error');
-    ws.onclose=()=>{setStatus(p=>p==='error'?p:'disconnected');if(dead||view!=='app')return;wsReconTim.current=setTimeout(()=>setWsRetry(v=>v+1),2500);};
+    ws.onclose=()=>{setStatus(p=>p==='error'?p:'disconnected');if(dead||view!=='app')return;const delay=Math.min(1000*Math.pow(1.5,Math.min(wsRetry,8)),30000);wsReconTim.current=setTimeout(()=>setWsRetry(v=>v+1),delay);};
     ws.onmessage=e=>{try{applyEvRef.current?.(JSON.parse(e.data));}catch{}};
     const hb=setInterval(()=>{if(ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify({type:'Ping',data:Date.now()}));},20000);
     return()=>{dead=true;clearInterval(hb);if(wsReconTim.current){clearTimeout(wsReconTim.current);wsReconTim.current=null;}ws.close();};
@@ -866,7 +893,7 @@ function AppShell() {
     finally{setSavingSt(false);setActiveModal(null);}
   };
 
-  const handleLogin=async(e)=>{e.preventDefault();setLoginErr('');if(!consent){setLoginErr('Please accept the privacy policy.');return;}setLoggingIn(true);try{await discoverCfg(cfg.api);let token=manualTok.trim(),uid=null;if(loginMode==='credentials'){const payload={email,password,friendly_name:'Ermine'};if(mfaCode.trim())payload.mfa_response={totp_code:mfaCode.trim()};const r=await fetch(`${cfg.api}/auth/session/login`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});if(!r.ok)throw new Error(r.status===401?'Invalid credentials or MFA.':'Login failed.');const d=await r.json();token=d.token||d.session_token;uid=d.user_id;}else{const r=await fetch(`${cfg.api}/users/@me`,{headers:{'x-session-token':token}});if(!r.ok)throw new Error('Invalid token.');const d=await r.json();uid=d._id;}if(!token||!uid)throw new Error('Session creation failed.');sc('ermine_token',token);sc('ermine_uid',uid);sc('ermine_api',cfg.api);setAuth({token,uid});setView('app');}catch(err){setLoginErr(err.message||'Unknown error');}finally{setLoggingIn(false);};};
+  const handleLogin=async(e)=>{e.preventDefault();setLoginErr('');if(!consent){setLoginErr('Please accept the privacy policy.');return;}setLoggingIn(true);try{await discoverCfg(cfg.api);let token=manualTok.trim(),uid=null;if(loginMode==='credentials'){const payload={email,password,friendly_name:'Ermine'};if(mfaCode.trim())payload.mfa_response={totp_code:mfaCode.trim()};const r=await fetch(`${cfg.api}/auth/session/login`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});if(!r.ok)throw new Error(r.status===401?'Invalid credentials or MFA.':'Login failed.');const d=await r.json();token=d.token||d.session_token;uid=d.user_id;}else{const r=await fetch(`${cfg.api}/users/@me`,{headers:{'x-session-token':token}});if(!r.ok)throw new Error('Invalid token.');const d=await r.json();uid=d._id;}if(!token||!uid)throw new Error('Session creation failed.');const saveApi=normalizeApi(cfg.api);sc('ermine_token',token);sc('ermine_uid',uid);sc('ermine_api',saveApi);setCfg(p=>({...p,api:saveApi}));setAuth({token,uid});setView('app');}catch(err){setLoginErr(err.message||'Unknown error');}finally{setLoggingIn(false);};};
 
   const logout=useCallback(()=>{['ermine_token','ermine_uid','ermine_api'].forEach(dc);['stoat_token','stoat_user_id','stoat_api_url'].forEach(k=>localStorage.removeItem(k));setAuth({token:null,uid:null});setMessages({});setServers({});setChannels({});setUsers({});setMembers({});preChRef.current={};preMbRef.current={};pendUsersRef.current=new Set();membLoadId.current=0;canFetchU.current=true;setIsMembLoad(false);setWsRetry(0);setUnread(new Set());setTyping({});if(wsReconTim.current){clearTimeout(wsReconTim.current);wsReconTim.current=null;}setView('login');setStatus('disconnected');},[]);
   logoutRef.current=logout;
@@ -953,7 +980,23 @@ if(aids.length)payload.attachments=aids;const r=await fetch(`${cfg.api}/channels
       {activeModal==='set-status'&&<Modal onClose={()=>setActiveModal(null)} title="Set Status"><div className="grid gap-1.5">{[['Online','Online','#3ABF7E'],['Idle','Idle','#F39F00'],['Busy','Do Not Disturb','#F84848'],['Focus','Focus','#4799F0'],['Invisible','Invisible','#A5A5A5']].map(([val,lbl,col])=><button key={val} className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors ${statusDraft.presence===val?'border-[#5865f2] bg-[#5865f2]/10':'border-[#35373c] bg-[#1e1f22] hover:border-[#5865f2]/30'}`} onClick={()=>setStatusDraft(p=>({...p,presence:val}))}><span className="w-3 h-3 rounded-full shrink-0" style={{background:col}}/><span className="text-sm text-[#f2f3f5]">{lbl}</span>{statusDraft.presence===val&&<Check size={14} className="ml-auto text-[#5865f2]"/>}</button>)}</div><input className={`${inp} mt-1`} maxLength={128} placeholder="Custom status…" value={statusDraft.text} onChange={e=>setStatusDraft(p=>({...p,text:e.target.value}))}/><button className="w-full rounded-md bg-[#5865f2] py-2 text-sm font-bold text-white hover:bg-[#4752c4] disabled:opacity-60" disabled={savingSt} onClick={saveStatus}>{savingSt?'Saving…':'Save Status'}</button></Modal>}
       {activeModal==='user-settings'&&<Modal onClose={()=>setActiveModal(null)} title="My Account" wide noPad><UserSettingsPanel user={users[auth.uid]} cdn={cfg.cdn} apiUrl={cfg.api} token={auth.token} onUpdate={u=>upsertUsers([u])} addToast={addToast} isLowSpec={isLowSpec} openStatus={()=>{setActiveModal(null);setTimeout(openStatusEditor,100);}} fetchProfile={fetchProfile}/></Modal>}
       {peekUser&&<Modal onClose={()=>setPeekUser(null)} title="Profile">
-        <div className="overflow-hidden rounded-xl bg-[#1e1f22]">{(peekProfile?.bannerUrl||bannerUrl(peekUser,cfg.cdn))?<img alt="" className="w-full object-cover" style={{aspectRatio:"10/3",display:"block"}} src={peekProfile?.bannerUrl||bannerUrl(peekUser,cfg.cdn)}/>:<div className="h-20 bg-gradient-to-br from-[#3b3f6b] to-[#5865f2]"/>}<div className="flex items-center gap-3 p-3"><Avatar user={peekUser} cdn={cfg.cdn} size="lg" always/><div className="min-w-0"><div className="text-base font-bold text-white">{peekUser.display_name||peekUser.username}</div><div className="text-xs text-[#80848e]">@{peekUser.username}#{peekUser.discriminator||'0000'}</div>{users[peekUser._id]?.status?.text&&<div className="text-xs text-[#b5bac1] mt-0.5">{users[peekUser._id].status.text}</div>}</div>{peekUser._id!==auth.uid&&<div className="ml-auto flex gap-1.5"><button className="rounded-lg bg-[#5865f2] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#4752c4]" onClick={()=>{openDm(peekUser._id);setPeekUser(null);}}>Message</button>{friends.some(f=>f._id===peekUser._id)?<button className="rounded-lg bg-[#35373c] px-3 py-1.5 text-xs text-[#F84848] hover:bg-[#F84848] hover:text-white" onClick={()=>removeFriend(peekUser._id)}>Remove</button>:<button className="rounded-lg bg-[#35373c] px-3 py-1.5 text-xs text-[#3ABF7E] hover:bg-[#3ABF7E] hover:text-white" onClick={()=>sendFriendReq(peekUser.username)}><UserPlus size={13}/></button>}</div>}</div></div>
+        <div className="overflow-hidden rounded-xl bg-[#1e1f22]">{(peekProfile?.bannerUrl||bannerUrl(peekUser,cfg.cdn))?<img alt="" className="w-full object-cover" style={{aspectRatio:"10/3",display:"block"}} src={peekProfile?.bannerUrl||bannerUrl(peekUser,cfg.cdn)}/>:<div className="h-20 bg-gradient-to-br from-[#3b3f6b] to-[#5865f2]"/>}
+        {(()=>{const liveU=users[peekUser._id]||peekUser;const hasData=liveU.username&&liveU.username!==liveU._id?.slice(0,8);return(
+          <div className="flex items-center gap-3 p-3">
+            <Avatar user={liveU} cdn={cfg.cdn} size="lg" always/>
+            <div className="min-w-0 flex-1">
+              {hasData?(<>
+                <div className="text-base font-bold text-white">{liveU.display_name||liveU.username}</div>
+                <div className="text-xs text-[#80848e]">@{liveU.username}{liveU.discriminator?`#${liveU.discriminator}`:''}</div>
+                {liveU.status?.text&&<div className="text-xs text-[#b5bac1] mt-0.5">{liveU.status.text}</div>}
+              </>):(
+                <div className="flex items-center gap-2 py-1"><Loader size={13} className="animate-spin text-[#80848e]"/><span className="text-sm text-[#80848e]">Loading profile…</span></div>
+              )}
+            </div>
+            {peekUser._id!==auth.uid&&hasData&&<div className="flex gap-1.5 shrink-0"><button className="rounded-lg bg-[#5865f2] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#4752c4]" onClick={()=>{openDm(peekUser._id);setPeekUser(null);}}>Message</button>{friends.some(f=>f._id===peekUser._id)?<button className="rounded-lg bg-[#35373c] px-3 py-1.5 text-xs text-[#F84848] hover:bg-[#F84848] hover:text-white" onClick={()=>removeFriend(peekUser._id)}>Remove</button>:<button className="rounded-lg bg-[#35373c] px-3 py-1.5 text-xs text-[#3ABF7E] hover:bg-[#3ABF7E] hover:text-white" onClick={()=>sendFriendReq(liveU.username)}><UserPlus size={13}/></button>}</div>}
+          </div>
+        );})()}
+        </div>
         <div className="grid grid-cols-2 gap-2 rounded-lg bg-[#1e1f22] p-3 text-xs text-[#b5bac1]"><div><span className="font-semibold text-[#f2f3f5] block mb-0.5">Joined platform</span>{dateLbl(joinedAt(peekUser))}</div><div><span className="font-semibold text-[#f2f3f5] block mb-0.5">Joined space</span>{selServer==='@me'?'—':dateLbl(joinedAt(peekMember))}</div></div>
         {(peekProfile?.content||peekBio)&&<div className="rounded-lg bg-[#1e1f22] p-3"><p className="text-[11px] font-bold uppercase tracking-widest text-[#80848e] mb-1">About me</p><p className="text-sm text-[#b5bac1] whitespace-pre-wrap">{peekProfile?.content||peekBio}</p></div>}
         {peekBadges.length>0&&<div className="rounded-lg bg-[#1e1f22] p-3"><p className="text-[11px] font-bold uppercase tracking-widest text-[#80848e] mb-1">Badges</p><div className="flex flex-wrap gap-1">{peekBadges.map(b=><span key={b} className="rounded-md bg-[#5865f2]/20 px-2 py-0.5 text-xs text-[#c4c9ff]">{b}</span>)}</div></div>}
