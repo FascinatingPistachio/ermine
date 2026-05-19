@@ -4,7 +4,15 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
-      "source": "/((?!.*\\..*).*)",
+      "source": "/stoat-api/:path*",
+      "destination": "https://api.stoat.chat/:path*"
+    },
+    {
+      "source": "/stoat-cdn/:path*",
+      "destination": "https://cdn.stoatusercontent.com/:path*"
+    },
+    {
+      "source": "/((?!.*\\.(?!html).*).*)(?<!\\.[a-zA-Z0-9]{2,5})$",
       "destination": "/index.html"
     }
   ],
@@ -19,11 +27,20 @@
       ]
     },
     {
-      "source": "/assets/(.*)",
+      "source": "/assets/index-(.*)",
       "headers": [
         {
           "key": "Cache-Control",
           "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    },
+    {
+      "source": "/ermine-logo.png",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=3600"
         }
       ]
     }
