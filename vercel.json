@@ -8,11 +8,7 @@
       "destination": "https://api.stoat.chat/:path*"
     },
     {
-      "source": "/stoat-cdn/:path*",
-      "destination": "https://cdn.stoatusercontent.com/:path*"
-    },
-    {
-      "source": "/((?!.*\\.(?!html).*).*)(?<!\\.[a-zA-Z0-9]{2,5})$",
+      "source": "/((?!.*\\..*).*)",
       "destination": "/index.html"
     }
   ],
