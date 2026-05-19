@@ -496,15 +496,35 @@ const FriendRow=memo(({f,cdn,channels,auth,unreadChannels,openDm,removeFriend,se
 FriendRow.displayName='FriendRow';
 
 // ─── User Settings Panel ──────────────────────────────────────────────────────
-const UserSettingsPanel=({user,cdn,apiUrl,token,onUpdate,addToast,isLowSpec,openStatus})=>{
+const UserSettingsPanel=({user,cdn,apiUrl,token,onUpdate,addToast,isLowSpec,openStatus,fetchProfile})=>{
   const[tab,setTab]=useState('profile');
   const[dn,setDn]=useState(user?.display_name||user?.username||'');
   const[bio,setBio]=useState(user?.profile?.content||'');
+  const[ownBannerUrl,setOwnBannerUrl]=useState(null);
+  useEffect(()=>{
+    if(!fetchProfile||!user?._id)return;
+    fetchProfile(user._id).then(p=>{
+      if(p?.content&&!bio)setBio(p.content);
+      if(p?.bannerUrl)setOwnBannerUrl(p.bannerUrl);
+    });
+  },[user?._id]);// eslint-disable-line
   const[saving,setSaving]=useState(false);
   const[pwCur,setPwCur]=useState('');const[pwNew,setPwNew]=useState('');const[pwConf,setPwConf]=useState('');const[pwS,setPwS]=useState(false);
   const avatRef=useRef(null);
   useEffect(()=>{setDn(user?.display_name||user?.username||'');setBio(user?.profile?.content||'');},[user]);
-  const saveProfile=async()=>{setSaving(true);try{const r=await fetch(`${apiUrl}/users/@me`,{method:'PATCH',headers:{'Content-Type':'application/json','x-session-token':token},body:JSON.stringify({display_name:dn.trim()||undefined,profile:{content:bio.trim()||undefined}})});if(!r.ok)throw new Error((await r.json().catch(()=>({}))).description||'Save failed');onUpdate(await r.json());addToast('Profile saved!','success');}catch(e){addToast(e.message,'error');}finally{setSaving(false);};};
+  const saveProfile=async()=>{
+    setSaving(true);
+    try{
+      const body={};
+      if(dn.trim()&&dn.trim()!==user?.username)body.display_name=dn.trim();
+      else if(!dn.trim())body.remove=['DisplayName'];
+      body.profile={content:bio.trim()||''};
+      const r=await fetch(`${apiUrl}/users/@me`,{method:'PATCH',headers:{'Content-Type':'application/json','x-session-token':token},body:JSON.stringify(body)});
+      if(!r.ok)throw new Error((await r.json().catch(()=>({}))).description||'Save failed');
+      onUpdate(await r.json());addToast('Profile saved!','success');
+    }catch(e){addToast(e.message,'error');}
+    finally{setSaving(false);}
+  };
   const changePw=async()=>{if(!pwNew||pwNew!==pwConf){addToast('Passwords do not match','error');return;}setPwS(true);try{const r=await fetch(`${apiUrl}/auth/account/change/password`,{method:'PATCH',headers:{'Content-Type':'application/json','x-session-token':token},body:JSON.stringify({current_password:pwCur,new_password:pwNew})});if(!r.ok)throw new Error((await r.json().catch(()=>({}))).description||'Failed');addToast('Password changed!','success');setPwCur('');setPwNew('');setPwConf('');}catch(e){addToast(e.message,'error');}finally{setPwS(false);};};
   const uploadAvatar=async(file)=>{if(!file)return;try{const body=new FormData();body.append('file',file);const ur=await fetch(`${cdn}/avatars`,{method:'POST',body,headers:{'x-session-token':token}});if(!ur.ok)throw new Error('Upload failed');const{id}=await ur.json();const r=await fetch(`${apiUrl}/users/@me`,{method:'PATCH',headers:{'Content-Type':'application/json','x-session-token':token},body:JSON.stringify({avatar:id})});if(!r.ok)throw new Error('Failed');onUpdate(await r.json());addToast('Avatar updated!','success');}catch(e){addToast(e.message,'error');};};
   return(
@@ -512,7 +532,7 @@ const UserSettingsPanel=({user,cdn,apiUrl,token,onUpdate,addToast,isLowSpec,open
       <nav className="w-36 shrink-0 border-r border-[#1e1f22] p-2 space-y-0.5">{[['profile','Profile'],['account','Account'],['about','About']].map(([id,lbl])=><button key={id} className={`w-full rounded-md px-3 py-2 text-left text-[13px] font-medium transition-colors ${tab===id?'bg-[#404249] text-[#f2f3f5]':'text-[#80848e] hover:bg-[#35373c] hover:text-[#b5bac1]'}`} onClick={()=>setTab(id)}>{lbl}</button>)}</nav>
       <div className="flex-1 min-w-0 p-4 overflow-y-auto">
         {tab==='profile'&&<div className="space-y-4">
-          <div className="relative"><div className="h-20 rounded-lg overflow-hidden">{bannerUrl(user,cdn)?<img src={bannerUrl(user,cdn)} alt="" className="w-full h-full object-cover"/>:<div className="w-full h-full bg-gradient-to-br from-[#3b3f6b] to-[#5865f2]"/>}</div><div className="absolute -bottom-5 left-3"><div className="relative group cursor-pointer" onClick={()=>avatRef.current?.click()}><Avatar user={user} cdn={cdn} size="lg"/><div className="absolute inset-0 rounded-full bg-black/60 opacity-0 group-hover:opacity-100 grid place-items-center text-white text-xs font-bold">Edit</div></div></div><input ref={avatRef} type="file" accept="image/*" className="hidden" onChange={e=>uploadAvatar(e.target.files?.[0])}/></div>
+          <div className="relative"><div className="h-20 rounded-lg overflow-hidden">{(ownBannerUrl||bannerUrl(user,cdn))?<img src={ownBannerUrl||bannerUrl(user,cdn)} alt="" className="w-full h-full object-cover"/>:<div className="w-full h-full bg-gradient-to-br from-[#3b3f6b] to-[#5865f2]"/>}</div><div className="absolute -bottom-5 left-3"><div className="relative group cursor-pointer" onClick={()=>avatRef.current?.click()}><Avatar user={user} cdn={cdn} size="lg"/><div className="absolute inset-0 rounded-full bg-black/60 opacity-0 group-hover:opacity-100 grid place-items-center text-white text-xs font-bold">Edit</div></div></div><input ref={avatRef} type="file" accept="image/*" className="hidden" onChange={e=>uploadAvatar(e.target.files?.[0])}/></div>
           <div className="pt-7"><div className="text-base font-bold text-white">{user?.username}</div><div className="text-xs text-[#80848e]">#{user?.discriminator||'0000'}</div></div>
           <div><label className="block text-xs font-bold uppercase tracking-widest text-[#80848e] mb-1">Display Name</label><input className={inp} value={dn} onChange={e=>setDn(e.target.value)} placeholder="Display name" maxLength={32}/></div>
           <div><label className="block text-xs font-bold uppercase tracking-widest text-[#80848e] mb-1">About Me</label><textarea className={`${inp} h-20 resize-none`} value={bio} onChange={e=>setBio(e.target.value)} placeholder="Tell people about yourself…" maxLength={2000}/></div>
@@ -566,6 +586,7 @@ function AppShell() {
   const [addFriendInput,setAddFriendInput]=useState('');
   const [addFriendLoading,setAFLoading]=useState(false);
   const [showAddFriend,setShowAddFriend]=useState(false);
+  const [peekProfile,setPeekProfile]=useState(null); // fetched profile for peekUser
   const [deleteTarget,setDeleteTarget]=useState(null);
   const [delSrvPending,setDelSrvPending]=useState(false);
   const [unread,setUnread]=useState(new Set());
@@ -592,6 +613,25 @@ function AppShell() {
   const [consent,setConsent]=useState(false);
   const [wsRetry,setWsRetry]=useState(0);
   const [isMembLoad,setIsMembLoad]=useState(false);
+
+  const profileCacheRef=useRef({}); // uid -> {content, background, bannerUrl, fetching}
+
+  // Fetch user profile (GET /users/{id}/profile) — stoat UserCard.tsx pattern
+  const fetchProfile=useCallback(async(uid)=>{
+    if(!uid||!auth.token)return null;
+    if(profileCacheRef.current[uid])return profileCacheRef.current[uid];
+    profileCacheRef.current[uid]={fetching:true};
+    try{
+      const r=await fetch(`${cfg.api}/users/${uid}/profile`,{headers:{'x-session-token':auth.token}});
+      if(!r.ok)return null;
+      const d=await r.json();
+      // d.background is the autumn ID for the banner
+      const bannerUrl=d.background?`${cfg.cdn}/backgrounds/${d.background}/original`:null;
+      const result={content:d.content||null,bannerUrl,background:d.background||null};
+      profileCacheRef.current[uid]=result;
+      return result;
+    }catch{return null;}
+  },[auth.token,cfg.api,cfg.cdn]);
 
   const wsRef=useRef(null);const botRef=useRef(null);const scrollRef=useRef(null);
   const subRef=useRef({});const preChRef=useRef({});const preMbRef=useRef({});
@@ -677,6 +717,13 @@ function AppShell() {
   const reactOpts=useMemo(()=>[...STD_EMOJI.map(e=>({value:e,label:e,title:e,custom:null})),...allCE.map(e=>({value:`:${e.id}:`,label:e.name,title:`${e.name} · ${e.serverName}`,custom:{id:e.id,name:e.name}}))]  ,[allCE]);
 
   const curTypingIds=useMemo(()=>{const s=typing[selChannel];return s?[...s].filter(id=>id!==auth.uid):[];},[typing,selChannel,auth.uid]);
+
+  // Fetch full profile when user peek opens
+  useEffect(()=>{
+    if(!peekUser?._id)return;
+    setPeekProfile(null);
+    fetchProfile(peekUser._id).then(p=>setPeekProfile(p||null));
+  },[peekUser?._id]); // eslint-disable-line
 
   const peekMember=useMemo(()=>!peekUser?._id||selServer==='@me'?null:members[`${selServer}:${peekUser._id}`],[members,peekUser,selServer]);
   const peekRoles=useMemo(()=>!peekMember||!selSrvObj?.roles?[]:(peekMember.roles||[]).map(id=>selSrvObj.roles?.[id]).filter(Boolean),[peekMember,selSrvObj]);
@@ -790,7 +837,25 @@ function AppShell() {
   const goLatest=()=>{isPgScroll.current=true;autoFollow.current=true;botRef.current?.scrollIntoView({behavior:'smooth'});requestAnimationFrame(()=>{isPgScroll.current=false;});setShowGoLatest(false);};
   const openLink=useCallback((url)=>{if(url.startsWith('lightbox:')){setLightboxUrl(url.slice(9));return;}setLinkUrl(url);},[]);
   const openStatusEditor=()=>{const u=users[auth.uid];setStatusDraft({presence:u?.status?.presence||'Online',text:u?.status?.text||''});setActiveModal('set-status');};
-  const saveStatus=async()=>{setSavingSt(true);setUsers(p=>({...p,[auth.uid]:{...p[auth.uid],status:{presence:statusDraft.presence,text:statusDraft.text||undefined}}}));try{await fetch(`${cfg.api}/users/@me`,{method:'PATCH',headers:{'Content-Type':'application/json','x-session-token':auth.token},body:JSON.stringify({status:{presence:statusDraft.presence,text:statusDraft.text||undefined}})});}catch{addToast('Failed to save status','error');}finally{setSavingSt(false);setActiveModal(null);}};
+  const saveStatus=async()=>{
+    setSavingSt(true);
+    // stoat source (UserMenu.tsx): user.edit({ status: { presence } })
+    // and user.edit({ remove: ["StatusText"] }) to clear
+    const body={status:{presence:statusDraft.presence}};
+    if(statusDraft.text?.trim())body.status.text=statusDraft.text.trim();
+    else body.remove=['StatusText'];
+    // Optimistic update
+    const newStatus={presence:statusDraft.presence};
+    if(statusDraft.text?.trim())newStatus.text=statusDraft.text.trim();
+    setUsers(p=>({...p,[auth.uid]:{...p[auth.uid],status:newStatus}}));
+    try{
+      const r=await fetch(`${cfg.api}/users/@me`,{method:'PATCH',headers:{'Content-Type':'application/json','x-session-token':auth.token},body:JSON.stringify(body)});
+      if(!r.ok)throw new Error((await r.json().catch(()=>({}))).description||'Failed');
+      const updated=await r.json();if(updated?._id)upsertUsers([updated]);
+      addToast('Status updated!','success');
+    }catch(e){addToast(e.message||'Failed to update status','error');}
+    finally{setSavingSt(false);setActiveModal(null);}
+  };
 
   const handleLogin=async(e)=>{e.preventDefault();setLoginErr('');if(!consent){setLoginErr('Please accept the privacy policy.');return;}setLoggingIn(true);try{await discoverCfg(cfg.api);let token=manualTok.trim(),uid=null;if(loginMode==='credentials'){const payload={email,password,friendly_name:'Ermine'};if(mfaCode.trim())payload.mfa_response={totp_code:mfaCode.trim()};const r=await fetch(`${cfg.api}/auth/session/login`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});if(!r.ok)throw new Error(r.status===401?'Invalid credentials or MFA.':'Login failed.');const d=await r.json();token=d.token||d.session_token;uid=d.user_id;}else{const r=await fetch(`${cfg.api}/users/@me`,{headers:{'x-session-token':token}});if(!r.ok)throw new Error('Invalid token.');const d=await r.json();uid=d._id;}if(!token||!uid)throw new Error('Session creation failed.');sc('ermine_token',token);sc('ermine_uid',uid);sc('ermine_api',cfg.api);setAuth({token,uid});setView('app');}catch(err){setLoginErr(err.message||'Unknown error');}finally{setLoggingIn(false);};};
 
@@ -877,11 +942,11 @@ if(aids.length)payload.attachments=aids;const r=await fetch(`${cfg.api}/channels
       {activeModal==='pinned'&&<Modal onClose={()=>setActiveModal(null)} title={`Pinned — #${curChName}`} wide>{pinnedMsgs.length===0?<p className="text-sm text-[#80848e] text-center py-6">No pinned messages.</p>:pinnedMsgs.map(m=>{const aId=typeof m.author==='string'?m.author:m.author?._id;return <div key={m._id} className="rounded-lg bg-[#1e1f22] border border-[#35373c] p-3 hover:border-[#5865f2]/30"><div className="flex items-center gap-2 mb-1.5"><Avatar user={users[aId]} cdn={cfg.cdn} size="sm"/><span className="text-sm font-semibold text-white">{users[aId]?.username||'Unknown'}</span><span className="text-xs text-[#80848e] ml-auto">{fmtT(m.createdAt||m._id)}</span><button className="text-xs text-[#5865f2] hover:underline ml-2" onClick={()=>{setActiveModal(null);jumpTo(m._id);}}>Jump</button></div><p className="text-sm text-[#b5bac1] whitespace-pre-wrap break-words">{m.content}</p></div>;})}</Modal>}
       {activeModal==='server-settings'&&selSrvObj&&<Modal onClose={()=>setActiveModal(null)} title="Space Settings"><label className="text-xs font-bold uppercase tracking-widest text-[#80848e] block mb-1">Name</label><div className="flex gap-2"><input className={inp} value={editSrvName} onChange={e=>setEditSrvName(e.target.value)}/><button className="rounded-md bg-[#5865f2] px-3 text-white hover:bg-[#4752c4] disabled:opacity-50" disabled={updatingSrv||!editSrvName.trim()} onClick={updateServer}><Save size={18}/></button></div>{isOwner&&<div className="border-t border-[#35373c] pt-3 mt-3"><p className="text-xs font-bold uppercase tracking-widest text-[#F84848] mb-2">Danger Zone</p><div className="flex items-center justify-between rounded-lg border border-[#F84848]/20 bg-[#F84848]/5 p-3"><div><div className="text-sm font-semibold text-white">Delete Space</div><div className="text-xs text-[#80848e]">Permanently removes this space.</div></div><button className="rounded-md bg-[#F84848] px-3 py-1.5 text-sm font-bold text-white hover:bg-[#d03030] disabled:opacity-60" disabled={updatingSrv} onClick={()=>setDelSrvPending(true)}>Delete</button></div></div>}</Modal>}
       {activeModal==='set-status'&&<Modal onClose={()=>setActiveModal(null)} title="Set Status"><div className="grid gap-1.5">{[['Online','Online','#3ABF7E'],['Idle','Idle','#F39F00'],['Busy','Do Not Disturb','#F84848'],['Focus','Focus','#4799F0'],['Invisible','Invisible','#A5A5A5']].map(([val,lbl,col])=><button key={val} className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors ${statusDraft.presence===val?'border-[#5865f2] bg-[#5865f2]/10':'border-[#35373c] bg-[#1e1f22] hover:border-[#5865f2]/30'}`} onClick={()=>setStatusDraft(p=>({...p,presence:val}))}><span className="w-3 h-3 rounded-full shrink-0" style={{background:col}}/><span className="text-sm text-[#f2f3f5]">{lbl}</span>{statusDraft.presence===val&&<Check size={14} className="ml-auto text-[#5865f2]"/>}</button>)}</div><input className={`${inp} mt-1`} maxLength={128} placeholder="Custom status…" value={statusDraft.text} onChange={e=>setStatusDraft(p=>({...p,text:e.target.value}))}/><button className="w-full rounded-md bg-[#5865f2] py-2 text-sm font-bold text-white hover:bg-[#4752c4] disabled:opacity-60" disabled={savingSt} onClick={saveStatus}>{savingSt?'Saving…':'Save Status'}</button></Modal>}
-      {activeModal==='user-settings'&&<Modal onClose={()=>setActiveModal(null)} title="My Account" wide noPad><UserSettingsPanel user={users[auth.uid]} cdn={cfg.cdn} apiUrl={cfg.api} token={auth.token} onUpdate={u=>upsertUsers([u])} addToast={addToast} isLowSpec={isLowSpec} openStatus={()=>{setActiveModal(null);setTimeout(openStatusEditor,100);}}/></Modal>}
+      {activeModal==='user-settings'&&<Modal onClose={()=>setActiveModal(null)} title="My Account" wide noPad><UserSettingsPanel user={users[auth.uid]} cdn={cfg.cdn} apiUrl={cfg.api} token={auth.token} onUpdate={u=>upsertUsers([u])} addToast={addToast} isLowSpec={isLowSpec} openStatus={()=>{setActiveModal(null);setTimeout(openStatusEditor,100);}} fetchProfile={fetchProfile}/></Modal>}
       {peekUser&&<Modal onClose={()=>setPeekUser(null)} title="Profile">
-        <div className="overflow-hidden rounded-xl bg-[#1e1f22]">{bannerUrl(peekUser,cfg.cdn)?<img alt="" className="h-24 w-full object-cover" src={bannerUrl(peekUser,cfg.cdn)}/>:<div className="h-20 bg-gradient-to-br from-[#3b3f6b] to-[#5865f2]"/>}<div className="flex items-center gap-3 p-3"><Avatar user={peekUser} cdn={cfg.cdn} size="lg" always/><div className="min-w-0"><div className="text-base font-bold text-white">{peekUser.display_name||peekUser.username}</div><div className="text-xs text-[#80848e]">@{peekUser.username}#{peekUser.discriminator||'0000'}</div>{users[peekUser._id]?.status?.text&&<div className="text-xs text-[#b5bac1] mt-0.5">{users[peekUser._id].status.text}</div>}</div>{peekUser._id!==auth.uid&&<div className="ml-auto flex gap-1.5"><button className="rounded-lg bg-[#5865f2] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#4752c4]" onClick={()=>{openDm(peekUser._id);setPeekUser(null);}}>Message</button>{friends.some(f=>f._id===peekUser._id)?<button className="rounded-lg bg-[#35373c] px-3 py-1.5 text-xs text-[#F84848] hover:bg-[#F84848] hover:text-white" onClick={()=>removeFriend(peekUser._id)}>Remove</button>:<button className="rounded-lg bg-[#35373c] px-3 py-1.5 text-xs text-[#3ABF7E] hover:bg-[#3ABF7E] hover:text-white" onClick={()=>sendFriendReq(peekUser.username)}><UserPlus size={13}/></button>}</div>}</div></div>
+        <div className="overflow-hidden rounded-xl bg-[#1e1f22]">{(peekProfile?.bannerUrl||bannerUrl(peekUser,cfg.cdn))?<img alt="" className="h-32 w-full object-cover" src={peekProfile?.bannerUrl||bannerUrl(peekUser,cfg.cdn)}/>:<div className="h-20 bg-gradient-to-br from-[#3b3f6b] to-[#5865f2]"/>}<div className="flex items-center gap-3 p-3"><Avatar user={peekUser} cdn={cfg.cdn} size="lg" always/><div className="min-w-0"><div className="text-base font-bold text-white">{peekUser.display_name||peekUser.username}</div><div className="text-xs text-[#80848e]">@{peekUser.username}#{peekUser.discriminator||'0000'}</div>{users[peekUser._id]?.status?.text&&<div className="text-xs text-[#b5bac1] mt-0.5">{users[peekUser._id].status.text}</div>}</div>{peekUser._id!==auth.uid&&<div className="ml-auto flex gap-1.5"><button className="rounded-lg bg-[#5865f2] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#4752c4]" onClick={()=>{openDm(peekUser._id);setPeekUser(null);}}>Message</button>{friends.some(f=>f._id===peekUser._id)?<button className="rounded-lg bg-[#35373c] px-3 py-1.5 text-xs text-[#F84848] hover:bg-[#F84848] hover:text-white" onClick={()=>removeFriend(peekUser._id)}>Remove</button>:<button className="rounded-lg bg-[#35373c] px-3 py-1.5 text-xs text-[#3ABF7E] hover:bg-[#3ABF7E] hover:text-white" onClick={()=>sendFriendReq(peekUser.username)}><UserPlus size={13}/></button>}</div>}</div></div>
         <div className="grid grid-cols-2 gap-2 rounded-lg bg-[#1e1f22] p-3 text-xs text-[#b5bac1]"><div><span className="font-semibold text-[#f2f3f5] block mb-0.5">Joined platform</span>{dateLbl(joinedAt(peekUser))}</div><div><span className="font-semibold text-[#f2f3f5] block mb-0.5">Joined space</span>{selServer==='@me'?'—':dateLbl(joinedAt(peekMember))}</div></div>
-        {peekBio&&<div className="rounded-lg bg-[#1e1f22] p-3"><p className="text-[11px] font-bold uppercase tracking-widest text-[#80848e] mb-1">About me</p><p className="text-sm text-[#b5bac1] whitespace-pre-wrap">{peekBio}</p></div>}
+        {(peekProfile?.content||peekBio)&&<div className="rounded-lg bg-[#1e1f22] p-3"><p className="text-[11px] font-bold uppercase tracking-widest text-[#80848e] mb-1">About me</p><p className="text-sm text-[#b5bac1] whitespace-pre-wrap">{peekProfile?.content||peekBio}</p></div>}
         {peekBadges.length>0&&<div className="rounded-lg bg-[#1e1f22] p-3"><p className="text-[11px] font-bold uppercase tracking-widest text-[#80848e] mb-1">Badges</p><div className="flex flex-wrap gap-1">{peekBadges.map(b=><span key={b} className="rounded-md bg-[#5865f2]/20 px-2 py-0.5 text-xs text-[#c4c9ff]">{b}</span>)}</div></div>}
         {peekRoles.length>0&&<div className="rounded-lg bg-[#1e1f22] p-3"><p className="text-[11px] font-bold uppercase tracking-widest text-[#80848e] mb-1">Roles</p><div className="flex flex-wrap gap-1">{peekRoles.map(r=><span key={r.id||r.name} className="rounded-md border-l-2 px-2 py-0.5 text-xs text-[#b5bac1]" style={{background:'#2b2d31',borderColor:r.colour||'#4c4f56'}}>{r.name}</span>)}</div></div>}
       </Modal>}
