@@ -27,7 +27,9 @@ const dayLbl=(m)=>{try{const d=m.createdAt?new Date(m.createdAt):uDate(m._id);if
 const dateLbl=(v)=>{if(!v)return'Unknown';try{const d=new Date(v);return isNaN(d)?'Unknown':d.toLocaleDateString([],{year:'numeric',month:'short',day:'numeric'});}catch{return'Unknown';}};
 
 // ─── Asset / data helpers ─────────────────────────────────────────────────────
-const avatUrl=(u,cdn)=>u?.avatar?._id?`${cdn}/avatars/${u.avatar._id}/original`:null;
+// Static by default — /original only on hover, like Discord Nitro
+const avatStaticUrl=(u,cdn)=>u?.avatar?._id?`${cdn}/avatars/${u.avatar._id}`:null;
+const avatAnimUrl =(u,cdn)=>u?.avatar?._id?`${cdn}/avatars/${u.avatar._id}/original`:null;
 const iconUrl=(s,cdn)=>s?.icon?._id?`${cdn}/icons/${s.icon._id}`:null;
 const bannerUrl=(u,cdn)=>{const b=u?.profile?.background||u?.banner;const id=typeof b==='string'?b:b?._id;return id?`${cdn}/backgrounds/${id}/original`:null;};
 const joinedAt=(e)=>e?.joined_at||e?.joinedAt||e?.created_at||e?.createdAt||null;
@@ -57,10 +59,27 @@ LazyImg.displayName='LazyImg';
 // ─── Avatar ───────────────────────────────────────────────────────────────────
 const AVSZ={sm:'h-8 w-8 text-xs',md:'h-10 w-10 text-sm',lg:'h-12 w-12 text-base'};
 const Avatar=memo(({user,cdn,size='md',always=false})=>{
-  const[err,setErr]=useState(false);const hue=uidHue(user?._id||'');
+  const[err,setErr]=useState(false);
+  const[hov,setHov]=useState(false);
+  const hue=uidHue(user?._id||'');
   useEffect(()=>setErr(false),[user?.avatar?._id]);
-  const src=!err&&user?.avatar?._id?avatUrl(user,cdn):null;
-  return <div className={`grid shrink-0 place-items-center overflow-hidden rounded-full font-semibold text-white select-none ${AVSZ[size]}`} style={{background:src?'transparent':`hsl(${hue} 40% 28%)`}}>{src?<LazyImg src={src} alt={user?.username||''} className="h-full w-full object-cover" onError={()=>setErr(true)}/>:<span>{(user?.username||'?').slice(0,2).toUpperCase()}</span>}</div>;
+  // always=true: modals/profile views show animated immediately
+  // otherwise: static PNG until hovered, then swap to /original GIF
+  const hasAnim=!err&&user?.avatar?._id;
+  const src=hasAnim?(always||hov?avatAnimUrl(user,cdn):avatStaticUrl(user,cdn)):null;
+  return (
+    <div
+      className={`grid shrink-0 place-items-center overflow-hidden rounded-full font-semibold text-white select-none ${AVSZ[size]}`}
+      style={{background:src?'transparent':`hsl(${hue} 40% 28%)`}}
+      onMouseEnter={()=>setHov(true)}
+      onMouseLeave={()=>setHov(false)}
+    >
+      {src
+        ? <img src={src} alt={user?.username||''} className="h-full w-full object-cover" loading="lazy" decoding="async" onError={()=>setErr(true)}/>
+        : <span>{(user?.username||'?').slice(0,2).toUpperCase()}</span>
+      }
+    </div>
+  );
 });
 Avatar.displayName='Avatar';
 
@@ -69,7 +88,7 @@ class AppBoundary extends Component {
   constructor(p){super(p);this.state={err:false,msg:''};}
   static getDerivedStateFromError(e){return{err:true,msg:e?.message||'Unknown error'};}
   componentDidCatch(e){console.error('Ermine crash:',e);}
-  render(){if(!this.state.err)return this.props.children;return(<div className="grid min-h-screen place-items-center bg-[#1e1f22] p-6 text-white"><div className="max-w-md text-center space-y-4"><img src="/assets/android-chrome-512x512.png" className="w-20 h-20 mx-auto rounded-2xl opacity-80" alt="Ermine"/><h1 className="text-xl font-bold">Ermine crashed</h1><p className="text-sm text-[#80848e] font-mono break-all">{this.state.msg}</p><button className="rounded-lg bg-[#5865f2] px-4 py-2 text-sm font-bold hover:bg-[#4752c4]" onClick={()=>window.location.reload()}>Reload</button></div></div>);}
+  render(){if(!this.state.err)return this.props.children;return(<div className="grid min-h-screen place-items-center bg-[#1e1f22] p-6 text-white"><div className="max-w-md text-center space-y-4"><img src="/assets/ermine-logo.png" className="w-20 h-20 mx-auto rounded-2xl opacity-80" alt="Ermine"/><h1 className="text-xl font-bold">Ermine crashed</h1><p className="text-sm text-[#80848e] font-mono break-all">{this.state.msg}</p><button className="rounded-lg bg-[#5865f2] px-4 py-2 text-sm font-bold hover:bg-[#4752c4]" onClick={()=>window.location.reload()}>Reload</button></div></div>);}
 }
 
 // ─── Modal ────────────────────────────────────────────────────────────────────
@@ -476,7 +495,7 @@ const UserSettingsPanel=({user,cdn,apiUrl,token,onUpdate,addToast,isLowSpec,open
           <div className="border-t border-[#1e1f22] pt-4"><div className="text-xs font-bold uppercase tracking-widest text-[#80848e] mb-3">Change Password</div><div className="space-y-2">{[['Current',pwCur,setPwCur,'current-password'],['New',pwNew,setPwNew,'new-password'],['Confirm',pwConf,setPwConf,'new-password']].map(([l,v,s,ac])=><div key={l}><label className="text-xs text-[#80848e] block mb-0.5">{l}</label><input className={inp} type="password" value={v} onChange={e=>s(e.target.value)} autoComplete={ac}/></div>)}</div><button className="mt-3 rounded-md bg-[#5865f2] px-4 py-2 text-sm font-bold text-white hover:bg-[#4752c4] disabled:opacity-60 transition-colors" disabled={pwS||!pwCur||!pwNew} onClick={changePw}>{pwS?'Saving…':'Change Password'}</button></div>
         </div>}
         {tab==='about'&&<div className="space-y-4">
-          <div className="flex items-start gap-3 rounded-lg bg-[#2b2d31] p-3"><img src="/assets/android-chrome-512x512.png" alt="Ermine" className="w-10 h-10 rounded-xl shrink-0"/><div><div className="text-sm font-bold text-white">Ermine v0.6.0</div><div className="text-xs text-[#80848e] mt-0.5">A refined client for stoat.chat</div><div className="text-xs text-[#80848e]">Mode: {isLowSpec?'Lite':'Standard'}</div><a href="https://ko-fi.com/stoatchat" target="_blank" rel="noopener noreferrer" className="text-xs text-[#5865f2] hover:underline mt-1 inline-block">Support Stoat →</a></div></div>
+          <div className="flex items-start gap-3 rounded-lg bg-[#2b2d31] p-3"><img src="/assets/ermine-logo.png" alt="Ermine" className="w-10 h-10 rounded-xl shrink-0"/><div><div className="text-sm font-bold text-white">Ermine v0.6.0</div><div className="text-xs text-[#80848e] mt-0.5">A refined client for stoat.chat</div><div className="text-xs text-[#80848e]">Mode: {isLowSpec?'Lite':'Standard'}</div><a href="https://ko-fi.com/stoatchat" target="_blank" rel="noopener noreferrer" className="text-xs text-[#5865f2] hover:underline mt-1 inline-block">Support Stoat →</a></div></div>
           <div className="text-xs text-[#80848e] rounded-lg bg-[#1e1f22] p-3 leading-relaxed"><p>Ermine is an experimental client for stoat.chat. Credentials stored only in browser cookies, never outside configured endpoints.</p></div>
         </div>}
       </div>
@@ -795,12 +814,12 @@ function AppShell() {
   },[cfg.cdn,PresenceDot]);
 
   // ── Loading / Login ────────────────────────────────────────────────────────
-  if(view==='loading')return <div className="grid h-screen place-items-center bg-[#1e1f22]"><div className="flex flex-col items-center gap-3"><img src="/assets/android-chrome-512x512.png" className="w-20 h-20 rounded-2xl animate-pulse" alt="Ermine"/><span className="text-[#80848e] text-sm">Loading Ermine…</span></div></div>;
+  if(view==='loading')return <div className="grid h-screen place-items-center bg-[#1e1f22]"><div className="flex flex-col items-center gap-3"><img src="/assets/ermine-logo.png" className="w-20 h-20 rounded-2xl animate-pulse" alt="Ermine"/><span className="text-[#80848e] text-sm">Loading Ermine…</span></div></div>;
 
   if(view==='login')return(
     <div className="min-h-screen bg-[#1e1f22] flex items-center justify-center p-4">
       <div className="w-full max-w-md rounded-2xl border border-[#35373c] bg-[#232428] p-8 shadow-2xl">
-        <div className="mb-6 text-center"><img src="/assets/android-chrome-512x512.png" alt="Ermine" className="w-20 h-20 mx-auto rounded-2xl mb-3 shadow-lg"/><h1 className="text-2xl font-bold text-white">Ermine</h1><p className="text-sm text-[#80848e]">A refined client for stoat.chat</p></div>
+        <div className="mb-6 text-center"><img src="/assets/ermine-logo.png" alt="Ermine" className="w-20 h-20 mx-auto rounded-2xl mb-3 shadow-lg"/><h1 className="text-2xl font-bold text-white">Ermine</h1><p className="text-sm text-[#80848e]">A refined client for stoat.chat</p></div>
         <div className="mb-5 grid grid-cols-2 gap-2 rounded-lg bg-[#1e1f22] p-1">{['credentials','token'].map(m=><button key={m} className={`rounded py-2 text-xs font-bold uppercase tracking-wide transition-colors ${loginMode===m?'bg-[#5865f2] text-white':'text-[#80848e] hover:text-[#b5bac1]'}`} onClick={()=>setLoginMode(m)}>{m==='credentials'?'Credentials':'Token'}</button>)}</div>
         <form className="space-y-3" onSubmit={handleLogin}>
           {loginMode==='credentials'?<><input className={inp} type="email" placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)} autoComplete="email"/><input className={inp} type="password" placeholder="Password" value={password} onChange={e=>setPassword(e.target.value)} autoComplete="current-password"/><input className={inp} type="text" placeholder="2FA code (optional)" value={mfaCode} onChange={e=>setMfaCode(e.target.value)} autoComplete="one-time-code"/></>:<textarea className={`${inp} h-24 resize-none`} placeholder="Paste session token" value={manualTok} onChange={e=>setManualTok(e.target.value)}/>}
