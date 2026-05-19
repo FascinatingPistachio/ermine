@@ -42,7 +42,7 @@ const dateLbl=(v)=>{if(!v)return'Unknown';try{const d=new Date(v);return isNaN(d
 const avatStaticUrl=(u,cdn)=>u?.avatar?._id?`${cdn}/avatars/${u.avatar._id}`:null;
 const avatAnimUrl =(u,cdn)=>u?.avatar?._id?`${cdn}/avatars/${u.avatar._id}/original`:null;
 const iconUrl=(s,cdn)=>s?.icon?._id?`${cdn}/icons/${s.icon._id}`:null;
-const bannerUrl=(u,cdn)=>{const b=u?.profile?.background||u?.banner;const id=typeof b==='string'?b:b?._id;return id?`${cdn}/backgrounds/${id}/original`:null;};
+const bannerUrl=(u,cdn)=>{const b=u?.profile?.background||u?.banner;if(!b)return null;const id=typeof b==='string'?b:typeof b==='object'?(b._id||b.id||null):null;return id&&typeof id==='string'?`${cdn}/backgrounds/${id}/original`:null;};
 const joinedAt=(e)=>e?.joined_at||e?.joinedAt||e?.created_at||e?.createdAt||null;
 const uidHue=(id='')=>{let h=0;for(let i=0;i<id.length;i++)h=(h*31+id.charCodeAt(i))&0xffff;return h%360;};
 const IMG_EXT=new Set(['png','jpg','jpeg','webp','gif','bmp','avif','svg','gifv']);
@@ -625,9 +625,11 @@ function AppShell() {
       const r=await fetch(`${cfg.api}/users/${uid}/profile`,{headers:{'x-session-token':auth.token}});
       if(!r.ok)return null;
       const d=await r.json();
-      // d.background is the autumn ID for the banner
-      const bannerUrl=d.background?`${cfg.cdn}/backgrounds/${d.background}/original`:null;
-      const result={content:d.content||null,bannerUrl,background:d.background||null};
+      // stoat profile API: d.background is an autumn file object { _id, content_type... } or a string ID
+      const bgRaw = d.background;
+      const bgId = typeof bgRaw === 'string' ? bgRaw : bgRaw?._id || null;
+      const bannerUrl = bgId ? `${cfg.cdn}/backgrounds/${bgId}/original` : null;
+      const result={content:d.content||null,bannerUrl,background:bgId||null};
       profileCacheRef.current[uid]=result;
       return result;
     }catch{return null;}

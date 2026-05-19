@@ -7,129 +7,14 @@
     <meta name="theme-color" content="#1e1f22" />
     <title>Ermine</title>
 
-    <!-- Favicon: replace public/assets/ermine-logo.png with the actual Ermine logo -->
     <link rel="icon" type="image/png" sizes="512x512" href="/assets/ermine-logo.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/assets/ermine-logo.png" />
     <link rel="apple-touch-icon" href="/assets/ermine-logo.png" />
     <link rel="shortcut icon" href="/assets/ermine-logo.png" />
 
-    <!-- Inter font -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-
-    <!-- Tailwind -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-      tailwind.config = {
-        theme: {
-          extend: {
-            fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
-          },
-        },
-      };
-    </script>
-
-    <style>
-      :root { color-scheme: dark; }
-
-      *, *::before, *::after { box-sizing: border-box; }
-
-      html, body, #root {
-        margin: 0; padding: 0;
-        height: 100%; min-height: 100%;
-        font-family: Inter, system-ui, -apple-system, sans-serif;
-        background: #313338;
-        -webkit-font-smoothing: antialiased;
-        text-rendering: optimizeSpeed;
-        overflow: hidden;
-      }
-
-      /* ── Scrollbars ── */
-      ::-webkit-scrollbar { width: 8px; height: 8px; }
-      ::-webkit-scrollbar-track { background: #2b2d31; border-radius: 4px; }
-      ::-webkit-scrollbar-thumb { background: #1a1b1e; border-radius: 4px; border: 2px solid #2b2d31; }
-      ::-webkit-scrollbar-thumb:hover { background: #111214; }
-      * { scrollbar-width: thin; scrollbar-color: #1a1b1e #2b2d31; }
-
-      /* ── Server pill (Discord signature) ── */
-      .srv-pill {
-        position: absolute; left: 0; top: 50%; transform: translateY(-50%);
-        width: 4px; height: 0; background: #fff;
-        border-radius: 0 4px 4px 0;
-        transition: height 150ms cubic-bezier(.4,0,.2,1);
-        pointer-events: none;
-      }
-      .srv-wrap { position: relative; display: flex; align-items: center; justify-content: center; width: 72px; }
-      .srv-wrap:hover .srv-pill { height: 20px; }
-      .srv-wrap.srv-active .srv-pill { height: 40px; }
-      .srv-icon {
-        border-radius: 50%;
-        transition: border-radius 150ms cubic-bezier(.4,0,.2,1), background 150ms ease;
-        overflow: hidden;
-        cursor: pointer;
-        display: grid; place-items: center;
-        width: 48px; height: 48px;
-        flex-shrink: 0;
-        user-select: none;
-      }
-      .srv-wrap:hover .srv-icon { border-radius: 16px; }
-      .srv-wrap.srv-active .srv-icon { border-radius: 16px; }
-
-      /* ── Animations ── */
-      @keyframes modalIn {
-        from { opacity: 0; transform: scale(.96) translateY(-8px); }
-        to   { opacity: 1; transform: scale(1) translateY(0); }
-      }
-      @keyframes toastIn {
-        from { opacity: 0; transform: translateY(8px); }
-        to   { opacity: 1; transform: translateY(0); }
-      }
-      @keyframes highlight {
-        0%,100% { background: transparent; }
-        30%,70% { background: rgba(88,101,242,.18); }
-      }
-      @keyframes typingBounce {
-        0%,60%,100% { transform: translateY(0); }
-        30% { transform: translateY(-5px); }
-      }
-      .msg-highlight { animation: highlight 1.4s ease; }
-      .typing-dot { animation: typingBounce 1.2s ease-in-out infinite; }
-      .typing-dot:nth-child(2) { animation-delay: .15s; }
-      .typing-dot:nth-child(3) { animation-delay: .3s; }
-
-      /* ── Channel items ── */
-      .ch-item { border-radius: 4px; cursor: pointer; display: flex; align-items: center; }
-      .ch-item:hover { background: #35373c; color: #dcddde; }
-      .ch-item.ch-active { background: #404249; color: #f2f3f5; }
-      .ch-item.ch-unread { color: #f2f3f5; font-weight: 600; }
-
-      /* ── Reactions ── */
-      .rxn-btn { transition: transform 80ms ease, background 80ms ease; }
-      .rxn-btn:hover { transform: scale(1.1); }
-
-      /* ── Composer ── */
-      .composer-ta {
-        resize: none; outline: none; background: transparent;
-        width: 100%; line-height: 1.375;
-        max-height: 50vh; overflow-y: auto;
-        font-size: 15px; color: #dcddde;
-        scrollbar-width: thin; scrollbar-color: #4a4d55 transparent;
-      }
-      .composer-ta::placeholder { color: #4f5660; }
-
-      /* ── Code blocks ── */
-      pre code { font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; }
-
-      /* ── Spoiler ── */
-      .spoiler { background: #202225; border-radius: 3px; cursor: pointer; padding: 0 2px; }
-      .spoiler.revealed { background: #383a40; cursor: default; }
-      .spoiler:not(.revealed) * { opacity: 0; pointer-events: none; user-select: none; }
-
-      /* ── Lazy image fade ── */
-      .lazy-img { opacity: 0; transition: opacity .2s ease; }
-      .lazy-img.loaded { opacity: 1; }
-    </style>
   </head>
   <body>
     <div id="root"></div>
