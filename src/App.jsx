@@ -2,6 +2,17 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, memo, Component } from 'react';
 import { AlertCircle, BookOpen, Check, ChevronDown, ChevronRight, Copy, Edit2, Hash, Info, Link, Loader, LogOut, Menu, MessageSquare, Paperclip, Pin, Plus, Reply, Save, Search, Send, Settings, Trash2, Users, UserPlus, UserX, X } from 'lucide-react';
 
+// ─── ULID generator (stoat uses ulid for message nonces, from Draft.ts) ─────
+const ULID_CHARS = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+function genUlid() {
+  const t = Date.now();
+  let s = '';
+  let tmp = t;
+  for (let i = 9; i >= 0; i--) { s = ULID_CHARS[tmp % 32] + s; tmp = Math.floor(tmp / 32); }
+  for (let i = 0; i < 16; i++) s += ULID_CHARS[Math.floor(Math.random() * 32)];
+  return s;
+}
+
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const T = { rail:'#1e1f22',sidebar:'#2b2d31',chat:'#313338',input:'#383a40',elevated:'#232428',hover:'#35373c',active:'#404249',brand:'#5865f2',brandH:'#4752c4',green:'#3ABF7E',yellow:'#F39F00',red:'#F84848',blue:'#4799F0',grey:'#A5A5A5',t1:'#f2f3f5',t2:'#b5bac1',t3:'#80848e' };
 const inp = `w-full rounded bg-[#1e1f22] border border-transparent px-3 py-2 text-sm text-[#f2f3f5] placeholder:text-[#80848e] focus:border-[#5865f2] focus:outline-none transition-colors`;
@@ -42,9 +53,11 @@ const uniq=(list)=>{const s=new Set();return list.filter(m=>{if(!m?._id||s.has(m
 const clrF=(base,clear=[])=>{if(!clear?.length)return base;const n={...base};clear.forEach(f=>{const k=f?.[0]?.toLowerCase()+f?.slice(1);if(k)delete n[k];});return n;};
 
 // ─── Twemoji ─────────────────────────────────────────────────────────────────
-const TW='https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/';
-const toCP=(s)=>{const r=[];let c=0,p=0,i=0;while(i<s.length){c=s.charCodeAt(i++);if(p){r.push((0x10000+((p-0xd800)<<10)+(c-0xdc00)).toString(16));p=0;}else if(0xd800<=c&&c<=0xdbff)p=c;else r.push(c.toString(16));}return r.join('-');};
-const TwImg=memo(({char,cls='inline-block w-5 h-5 align-bottom'})=><img src={`${TW}${toCP(char)}.png`} alt={char} className={cls} draggable={false} onError={e=>{e.currentTarget.style.display='none';}}/>);
+// stoat uses its own emoji CDN (from UnicodeEmoji.tsx in stoat source)
+const STOAT_EMOJI='https://static.stoat.chat/emoji/fluent-3d/';
+const toCP=(s)=>{const r=[];let c=0,p=0,i=0;while(i<s.length){c=s.charCodeAt(i++);if(p){r.push((0x10000+((p-0xd800)<<10)+(c-0xdc00)).toString(16));p=0;}else if(0xd800<=c&&c<=0xdbff)p=c;else r.push(c.toString(16));}return r.join('-');}
+const stoatEmojiUrl=(char)=>`${STOAT_EMOJI}${toCP(char)}.svg?v=1`;
+const TwImg=memo(({char,cls='inline-block w-5 h-5 align-bottom'})=><img src={stoatEmojiUrl(char)} alt={char} className={cls} draggable={false} onError={e=>{e.currentTarget.style.display='none';}}/>);
 TwImg.displayName='TwImg';
 const twR=(text,cls='inline-block w-5 h-5 align-bottom')=>text?text.split(/([\uD800-\uDBFF][\uDC00-\uDFFF])/g).map((p,i)=>/[\uD800-\uDBFF][\uDC00-\uDFFF]/.test(p)?<TwImg key={i} char={p} cls={cls}/>:p):null;
 
@@ -186,9 +199,10 @@ const EMOJI_CATS = [
 const STD_EMOJI = EMOJI_CATS.flatMap(c=>c.e);
 
 // ─── Emoji + GIF Picker ───────────────────────────────────────────────────────
-const GIPHY_KEY = 'dc6zaTOxFJmzC';
+// stoat uses gifbox.me (from GifPicker.tsx + env.ts in stoat source)
+const GIFBOX_URL = 'https://api.gifbox.me';
 
-const EmojiGifPicker = memo(({ ceById, allCE, cdn, onEmoji, onCE, onGif }) => {
+const EmojiGifPicker = memo(({ ceById, allCE, cdn, onEmoji, onCE, onGif, token }) => {
   const [tab, setTab]     = useState('emoji');
   const [eCat, setECat]   = useState(0);
   const [q, setQ]         = useState('');
@@ -199,20 +213,24 @@ const EmojiGifPicker = memo(({ ceById, allCE, cdn, onEmoji, onCE, onGif }) => {
   const debRef = useRef(null);
 
   useEffect(()=>{
+    if(!token)return;
     setGL(true);
-    fetch(`https://api.giphy.com/v1/gifs/trending?api_key=${GIPHY_KEY}&limit=24&rating=g`)
-      .then(r=>r.json()).then(d=>{setTr(d.data||[]);setGL(false);}).catch(()=>setGL(false));
-  },[]);
+    fetch(`${GIFBOX_URL}/trending?locale=en_US&limit=24`,{headers:{'x-session-token':token}})
+      .then(r=>r.json()).then(d=>{setTr(d.results||[]);setGL(false);}).catch(()=>setGL(false));
+  },[token]);
 
   const searchGifs = useCallback((v)=>{
     clearTimeout(debRef.current);
     if(!v.trim()){setGifs([]);return;}
     setGL(true);
     debRef.current = setTimeout(()=>{
-      fetch(`https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_KEY}&q=${encodeURIComponent(v)}&limit=24&rating=g`)
-        .then(r=>r.json()).then(d=>{setGifs(d.data||[]);setGL(false);}).catch(()=>setGL(false));
+      const endpoint = v==='trending'
+        ? `${GIFBOX_URL}/trending?locale=en_US`
+        : `${GIFBOX_URL}/search?locale=en_US&query=${encodeURIComponent(v)}`;
+      fetch(endpoint,{headers:{'x-session-token':token}})
+        .then(r=>r.json()).then(d=>{setGifs(d.results||[]);setGL(false);}).catch(()=>setGL(false));
     },400);
-  },[]);
+  },[token]);
 
   const filtE = useMemo(()=>{if(!q)return EMOJI_CATS[eCat]?.e||[];const ql=q.toLowerCase();return STD_EMOJI.filter(e=>e.includes(ql));},[q,eCat]);
   const filtCE = useMemo(()=>{if(!q)return allCE;const ql=q.toLowerCase();return allCE.filter(e=>e.name.toLowerCase().includes(ql)||e.serverName?.toLowerCase().includes(ql));},[q,allCE]);
@@ -262,9 +280,19 @@ const EmojiGifPicker = memo(({ ceById, allCE, cdn, onEmoji, onCE, onGif }) => {
               <>
                 {!gifQ&&<p className="text-[10px] font-bold uppercase tracking-widest text-[#80848e] mb-2 px-1">Trending</p>}
                 <div className="columns-2 gap-1.5">
-                  {displayGifs.map(gif=>{const src=gif.images?.fixed_height_small?.url||gif.images?.downsized?.url||gif.images?.original?.url;return src?(<button key={gif.id} className="w-full mb-1.5 rounded-lg overflow-hidden hover:opacity-80 transition-opacity" onClick={()=>onGif(gif.images?.original?.url||src)} type="button"><LazyImg src={src} alt={gif.title||'GIF'} className="w-full object-cover"/></button>):null;})}
+                  {displayGifs.map((gif,gi)=>{
+                    // gifbox format: { url, media_formats: { webm, tinywebm } }
+                    const thumb=gif.media_formats?.tinywebm?.url||gif.url;
+                    const full=gif.url||thumb;
+                    if(!thumb)return null;
+                    return(
+                      <button key={gif.id||gi} className="w-full mb-1.5 rounded-lg overflow-hidden hover:opacity-80 transition-opacity" onClick={()=>onGif(full)} type="button">
+                        <video src={thumb} className="w-full object-cover" autoPlay loop muted playsInline style={{pointerEvents:'none'}}/>
+                      </button>
+                    );
+                  })}
                 </div>
-                <p className="text-center text-[9px] text-[#4f5660] mt-2 pb-1">Powered by GIPHY</p>
+                <p className="text-center text-[9px] text-[#4f5660] mt-2 pb-1">Powered by Gifbox</p>
               </>
             )}
           </div>
@@ -478,7 +506,7 @@ const UserSettingsPanel=({user,cdn,apiUrl,token,onUpdate,addToast,isLowSpec,open
   useEffect(()=>{setDn(user?.display_name||user?.username||'');setBio(user?.profile?.content||'');},[user]);
   const saveProfile=async()=>{setSaving(true);try{const r=await fetch(`${apiUrl}/users/@me`,{method:'PATCH',headers:{'Content-Type':'application/json','x-session-token':token},body:JSON.stringify({display_name:dn.trim()||undefined,profile:{content:bio.trim()||undefined}})});if(!r.ok)throw new Error((await r.json().catch(()=>({}))).description||'Save failed');onUpdate(await r.json());addToast('Profile saved!','success');}catch(e){addToast(e.message,'error');}finally{setSaving(false);};};
   const changePw=async()=>{if(!pwNew||pwNew!==pwConf){addToast('Passwords do not match','error');return;}setPwS(true);try{const r=await fetch(`${apiUrl}/auth/account/change/password`,{method:'PATCH',headers:{'Content-Type':'application/json','x-session-token':token},body:JSON.stringify({current_password:pwCur,new_password:pwNew})});if(!r.ok)throw new Error((await r.json().catch(()=>({}))).description||'Failed');addToast('Password changed!','success');setPwCur('');setPwNew('');setPwConf('');}catch(e){addToast(e.message,'error');}finally{setPwS(false);};};
-  const uploadAvatar=async(file)=>{if(!file)return;try{const body=new FormData();body.append('file',file);const ur=await fetch(`${cdn}/avatars`,{method:'POST',body,headers:{'X-Session-Token':token}});if(!ur.ok)throw new Error('Upload failed');const{id}=await ur.json();const r=await fetch(`${apiUrl}/users/@me`,{method:'PATCH',headers:{'Content-Type':'application/json','x-session-token':token},body:JSON.stringify({avatar:id})});if(!r.ok)throw new Error('Failed');onUpdate(await r.json());addToast('Avatar updated!','success');}catch(e){addToast(e.message,'error');};};
+  const uploadAvatar=async(file)=>{if(!file)return;try{const body=new FormData();body.append('file',file);const ur=await fetch(`${cdn}/avatars`,{method:'POST',body,headers:{'x-session-token':token}});if(!ur.ok)throw new Error('Upload failed');const{id}=await ur.json();const r=await fetch(`${apiUrl}/users/@me`,{method:'PATCH',headers:{'Content-Type':'application/json','x-session-token':token},body:JSON.stringify({avatar:id})});if(!r.ok)throw new Error('Failed');onUpdate(await r.json());addToast('Avatar updated!','success');}catch(e){addToast(e.message,'error');};};
   return(
     <div className="flex min-h-[380px]">
       <nav className="w-36 shrink-0 border-r border-[#1e1f22] p-2 space-y-0.5">{[['profile','Profile'],['account','Account'],['about','About']].map(([id,lbl])=><button key={id} className={`w-full rounded-md px-3 py-2 text-left text-[13px] font-medium transition-colors ${tab===id?'bg-[#404249] text-[#f2f3f5]':'text-[#80848e] hover:bg-[#35373c] hover:text-[#b5bac1]'}`} onClick={()=>setTab(id)}>{lbl}</button>)}</nav>
@@ -770,11 +798,13 @@ function AppShell() {
   logoutRef.current=logout;
 
   // ── Messaging ─────────────────────────────────────────────────────────────
-  const uploadFiles=async(files=[])=>{const ids=[];for(const f of files){const body=new FormData();body.append('file',f);const r=await fetch(`${cfg.cdn}/attachments`,{method:'POST',body,headers:{'X-Session-Token':auth.token}});if(!r.ok)throw new Error(`Upload failed: ${f.name}`);const d=await r.json();if(d?.id)ids.push(d.id);}return ids;};
+  const uploadFiles=async(files=[])=>{const ids=[];for(const f of files){const body=new FormData();body.append('file',f);const r=await fetch(`${cfg.cdn}/attachments`,{method:'POST',body,headers:{'x-session-token':auth.token}});if(!r.ok)throw new Error(`Upload failed: ${f.name}`);const d=await r.json();if(d?.id)ids.push(d.id);}return ids;};
 
-  const sendMessage=async()=>{const content=inputText.trim();const hasFiles=pendingFiles.length>0;if((!content&&!hasFiles)||!selChannel||selChannel==='friends')return;const capFiles=[...pendingFiles];const capReply=replyingTo;setInputText('');setPendingFiles([]);setReplyingTo(null);setShowPicker(false);setIsUploading(hasFiles);sendTypingEnd();const nonce=crypto.randomUUID();const pid=`pending-${nonce}`;const me=users[auth.uid]||{_id:auth.uid,username:'You'};const opt={_id:pid,channel:selChannel,author:auth.uid,user:me,content,createdAt:new Date().toISOString(),reactions:{},replies:capReply?[{id:capReply._id,mention:false}]:undefined};setMessages(p=>{const l=p[selChannel]||[];return{...p,[selChannel]:uniq([...l,opt].slice(-200))};});try{const aids=hasFiles?await uploadFiles(capFiles):[];const payload={content,nonce,replies:capReply?[{id:capReply._id,mention:false}]:undefined,attachments:aids.length?aids:undefined};const r=await fetch(`${cfg.api}/channels/${selChannel}/messages`,{method:'POST',headers:{'Content-Type':'application/json','x-session-token':auth.token},body:JSON.stringify(payload)});if(!r.ok)throw new Error('Send failed');const posted=await r.json();if(posted?._id){upsertFromMsgs([posted]);setMessages(p=>{const l=(p[selChannel]||[]).filter(m=>m._id!==pid);const dd=l.some(m=>m._id===posted._id)?l.map(m=>m._id===posted._id?posted:m):[...l,posted];return{...p,[selChannel]:uniq(dd.sort((a,b)=>a._id>b._id?1:-1))};});}}catch(err){setMessages(p=>({...p,[selChannel]:(p[selChannel]||[]).filter(m=>m._id!==pid)}));setInputText(content);addToast(err.message||'Failed to send','error');}finally{setIsUploading(false);};};
+  const sendMessage=async()=>{const content=inputText.trim();const hasFiles=pendingFiles.length>0;if((!content&&!hasFiles)||!selChannel||selChannel==='friends')return;const capFiles=[...pendingFiles];const capReply=replyingTo;setInputText('');setPendingFiles([]);setReplyingTo(null);setShowPicker(false);setIsUploading(hasFiles);sendTypingEnd();const nonce=genUlid();const pid=`pending-${nonce}`;const me=users[auth.uid]||{_id:auth.uid,username:'You'};const opt={_id:pid,channel:selChannel,author:auth.uid,user:me,content,createdAt:new Date().toISOString(),reactions:{},replies:capReply?[{id:capReply._id,mention:false}]:undefined};setMessages(p=>{const l=p[selChannel]||[];return{...p,[selChannel]:uniq([...l,opt].slice(-200))};});try{const aids=hasFiles?await uploadFiles(capFiles):[];// stoat source: omit attachments entirely when empty (not send [])
+const payload={content,nonce,replies:capReply?[{id:capReply._id,mention:false}]:undefined};
+if(aids.length)payload.attachments=aids;const r=await fetch(`${cfg.api}/channels/${selChannel}/messages`,{method:'POST',headers:{'Content-Type':'application/json','x-session-token':auth.token},body:JSON.stringify(payload)});if(!r.ok)throw new Error('Send failed');const posted=await r.json();if(posted?._id){upsertFromMsgs([posted]);setMessages(p=>{const l=(p[selChannel]||[]).filter(m=>m._id!==pid);const dd=l.some(m=>m._id===posted._id)?l.map(m=>m._id===posted._id?posted:m):[...l,posted];return{...p,[selChannel]:uniq(dd.sort((a,b)=>a._id>b._id?1:-1))};});}}catch(err){setMessages(p=>({...p,[selChannel]:(p[selChannel]||[]).filter(m=>m._id!==pid)}));setInputText(content);addToast(err.message||'Failed to send','error');}finally{setIsUploading(false);};};
 
-  const sendGif=async(url)=>{if(!selChannel||selChannel==='friends')return;setShowPicker(false);const nonce=crypto.randomUUID();const pid=`pending-${nonce}`;const me=users[auth.uid]||{_id:auth.uid,username:'You'};setMessages(p=>{const l=p[selChannel]||[];return{...p,[selChannel]:uniq([...l,{_id:pid,channel:selChannel,author:auth.uid,user:me,content:url,createdAt:new Date().toISOString(),reactions:{}}].slice(-200))};});try{const r=await fetch(`${cfg.api}/channels/${selChannel}/messages`,{method:'POST',headers:{'Content-Type':'application/json','x-session-token':auth.token},body:JSON.stringify({content:url,nonce})});if(!r.ok)throw new Error('Send failed');const posted=await r.json();if(posted?._id)setMessages(p=>{const l=(p[selChannel]||[]).filter(m=>m._id!==pid);return{...p,[selChannel]:uniq([...l,posted].sort((a,b)=>a._id>b._id?1:-1))};});}catch{setMessages(p=>({...p,[selChannel]:(p[selChannel]||[]).filter(m=>m._id!==pid)}));}};
+  const sendGif=async(url)=>{if(!selChannel||selChannel==='friends')return;setShowPicker(false);const nonce=genUlid();const pid=`pending-${nonce}`;const me=users[auth.uid]||{_id:auth.uid,username:'You'};setMessages(p=>{const l=p[selChannel]||[];return{...p,[selChannel]:uniq([...l,{_id:pid,channel:selChannel,author:auth.uid,user:me,content:url,createdAt:new Date().toISOString(),reactions:{}}].slice(-200))};});try{const r=await fetch(`${cfg.api}/channels/${selChannel}/messages`,{method:'POST',headers:{'Content-Type':'application/json','x-session-token':auth.token},body:JSON.stringify({content:url,nonce})});if(!r.ok)throw new Error('Send failed');const posted=await r.json();if(posted?._id)setMessages(p=>{const l=(p[selChannel]||[]).filter(m=>m._id!==pid);return{...p,[selChannel]:uniq([...l,posted].sort((a,b)=>a._id>b._id?1:-1))};});}catch{setMessages(p=>({...p,[selChannel]:(p[selChannel]||[]).filter(m=>m._id!==pid)}));}};
 
   const editMessage=async(msgId,content)=>{try{await fetch(`${cfg.api}/channels/${selChannel}/messages/${msgId}`,{method:'PATCH',headers:{'Content-Type':'application/json','x-session-token':auth.token},body:JSON.stringify({content})});}catch{addToast('Failed to edit','error');};};
   const requestDelete=useCallback((msg)=>setDeleteTarget(msg),[]);
@@ -938,7 +968,7 @@ function AppShell() {
               <input className="hidden" multiple onChange={onFilePick} ref={fileInputRef} type="file"/>
               <div className="relative shrink-0">
                 <button className="p-2 text-[#80848e] hover:text-[#b5bac1] disabled:opacity-30 text-xl leading-none" disabled={selChannel==='friends'} onClick={()=>setShowPicker(p=>!p)}>😊</button>
-                {showPicker&&selChannel!=='friends'&&<div ref={pickerRef} className="absolute bottom-full mb-2 left-0 z-20"><EmojiGifPicker ceById={ceById} allCE={allCE} cdn={cfg.cdn} onEmoji={addEmoji} onCE={addCE} onGif={sendGif}/></div>}
+                {showPicker&&selChannel!=='friends'&&<div ref={pickerRef} className="absolute bottom-full mb-2 left-0 z-20"><EmojiGifPicker ceById={ceById} allCE={allCE} cdn={cfg.cdn} onEmoji={addEmoji} onCE={addCE} onGif={sendGif} token={auth.token}/></div>}
               </div>
               <textarea ref={composerRef} className={`composer-ta flex-1 px-2 py-1.5 ${selChannel==='friends'?'opacity-50 cursor-not-allowed':''}`} rows={1} disabled={selChannel==='friends'} value={inputText}
                 onPaste={onPaste}
