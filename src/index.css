@@ -55,7 +55,7 @@ html, body, #root {
 }
 @keyframes highlight {
   0%,100% { background: transparent; }
-  30%,70%  { background: rgba(88,101,242,.18); }
+  30%,70%  { background: rgba(58,191,126,.18); }
 }
 @keyframes typingBounce {
   0%,60%,100% { transform: translateY(0); }
@@ -67,7 +67,7 @@ html, body, #root {
 .typing-dot:nth-child(3) { animation-delay: .3s; }
 
 /* Channel items */
-.ch-item { border-radius: 4px; cursor: pointer; display: flex; align-items: center; }
+.ch-item { border-radius: 4px; cursor: pointer; display: flex; align-items: center; color: #80848e; }
 .ch-item:hover { background: #35373c; color: #dcddde; }
 .ch-item.ch-active { background: #404249; color: #f2f3f5; }
 .ch-item.ch-unread { color: #f2f3f5; font-weight: 600; }
