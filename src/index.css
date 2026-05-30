@@ -55,7 +55,7 @@ html, body, #root {
 }
 @keyframes highlight {
   0%,100% { background: transparent; }
-  30%,70%  { background: rgba(58,191,126,.18); }
+  30%,70%  { background: rgba(138,180,248,.18); }
 }
 @keyframes typingBounce {
   0%,60%,100% { transform: translateY(0); }
