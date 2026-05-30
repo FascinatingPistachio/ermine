@@ -1,6 +1,6 @@
 // Ermine 0.6.0 — stoat.chat refined client
 import React, { useCallback, useEffect, useMemo, useRef, useState, memo, Component } from 'react';
-import { AlertCircle, BookOpen, Check, ChevronDown, ChevronRight, Copy, Edit2, Hash, Info, Link, Loader, LogOut, Menu, MessageSquare, Paperclip, Pin, Plus, Reply, Save, Search, Send, Settings, Trash2, Users, UserPlus, UserX, X } from 'lucide-react';
+import { AlertCircle, BookOpen, Check, ChevronDown, ChevronRight, Copy, Edit2, Hash, Info, Link, Loader, LogOut, Menu, MessageSquare, Paperclip, Pin, Plus, Reply, Save, Search, Send, Settings, Trash2, Users, UserMinus, UserPlus, UserX, X } from 'lucide-react';
 
 // ─── ULID generator (stoat uses ulid for message nonces, from Draft.ts) ─────
 const ULID_CHARS = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
@@ -175,11 +175,13 @@ const getCEId=(t)=>t?.slice(1,-1);
 const renderCE=(token,ceById,cdn,cls='inline h-5 w-5 align-text-bottom object-contain')=>{const id=isCE(token)?getCEId(token):/^[A-Z0-9]{26}$/i.test(token)?token:null;if(id)return <img alt={ceById?.[id]?.name||id} className={cls} src={`${cdn}/emojis/${id}`} style={{display:'inline'}}/>;return twR(token);};
 
 // ─── Message content renderer ─────────────────────────────────────────────────
-function renderContent(content,users,channels,onUser,ceById,cdn,openLink){
+function renderContent(content,users,channels,onUser,ceById,cdn,openLink,roles){
   if(!content)return null;
-  return content.split(/(<@!?[A-Za-z0-9]+>|<#[A-Za-z0-9]+>|:[A-Z0-9]{26}:|:([a-z0-9_+\-]+):)/gi).map((p,i)=>{
+  return content.split(/(<@!?[A-Za-z0-9]+>|<@&[A-Za-z0-9]+>|<#[A-Za-z0-9]+>|@everyone|@online|:[A-Z0-9]{26}:|:([a-z0-9_+\-]+):)/gi).map((p,i)=>{
     if(!p)return null;
+    if(p==='@everyone'||p==='@online')return <span key={i} className="mx-0.5 rounded bg-[#F39F00]/20 px-1 text-[#F39F00] font-medium">{p}</span>;
     const um=p.match(/^<@!?([A-Za-z0-9]+)>$/);if(um){const u=users[um[1]];return <button key={i} className="mx-0.5 inline rounded bg-[#3ABF7E]/25 px-1 text-[#a7f3d0] hover:bg-[#3ABF7E]/40" onClick={()=>onUser(u||{_id:um[1],username:um[1].slice(0,8)})} type="button">@{u?.username||um[1]}</button>;}
+    const rm=p.match(/^<@&([A-Za-z0-9]+)>$/);if(rm){const role=roles?.[rm[1]];return <span key={i} className="mx-0.5 rounded px-1 font-medium" style={{background:(role?.colour||'#3ABF7E')+'33',color:role?.colour||'#a7f3d0'}}>@{role?.name||rm[1].slice(0,8)}</span>;}
     const cm=p.match(/^<#([A-Za-z0-9]+)>$/);if(cm)return <span key={i} className="mx-0.5 rounded bg-[#35373c] px-1 text-[#f2f3f5]">#{channels[cm[1]]?.name||'unknown'}</span>;
     if(isCE(p))return <span key={i} className="inline-flex items-center mx-0.5" title={ceById?.[getCEId(p)]?.name}>{renderCE(p,ceById,cdn)}</span>;
     const sc=p.match(/^:([a-z0-9_+\-]+):$/i);if(sc&&SC_MAP[sc[1].toLowerCase()])return <TwImg key={i} char={SC_MAP[sc[1].toLowerCase()]}/>;
@@ -188,7 +190,7 @@ function renderContent(content,users,channels,onUser,ceById,cdn,openLink){
 }
 
 // ─── System messages ──────────────────────────────────────────────────────────
-const renderSys=(msg,users)=>{const sys=msg.system;if(!sys)return null;const n=(id)=>users[id]?.username||id?.slice(0,8)||'?';switch(sys.type){case 'text':return <span className="italic">{sys.content}</span>;case 'user_added':return <span className="italic text-[#3ABF7E]">👋 {n(sys.by)} added {n(sys.id)}</span>;case 'user_remove':return <span className="italic text-[#F84848]">👋 {n(sys.by)} removed {n(sys.id)}</span>;case 'user_joined':return <span className="italic text-[#3ABF7E]">👋 {n(sys.id)} joined</span>;case 'user_left':return <span className="italic text-[#80848e]">👋 {n(sys.id)} left</span>;case 'user_kicked':return <span className="italic text-[#F84848]">👢 {n(sys.id)} kicked by {n(sys.by)}</span>;case 'user_banned':return <span className="italic text-[#F84848]">🔨 {n(sys.id)} banned by {n(sys.by)}</span>;case 'channel_renamed':return <span className="italic text-[#4799F0]">✏️ {n(sys.by)} renamed to <strong>{sys.name}</strong></span>;case 'channel_ownership_changed':return <span className="italic text-[#F39F00]">👑 Ownership to {n(sys.to)}</span>;default:return <span className="italic text-[#80848e]">[{sys.type}]</span>;}};
+const renderSys=(msg,users)=>{const sys=msg.system;if(!sys)return null;const n=(id)=>users[id]?.username||id?.slice(0,8)||'?';switch(sys.type){case 'text':return <span className="italic">{sys.content}</span>;case 'user_added':return <span className="italic text-[#3ABF7E]">👋 {n(sys.by)} added {n(sys.id)}</span>;case 'user_remove':return <span className="italic text-[#F84848]">👋 {n(sys.by)} removed {n(sys.id)}</span>;case 'user_joined':return <span className="italic text-[#3ABF7E]">👋 {n(sys.id)} joined</span>;case 'user_left':return <span className="italic text-[#80848e]">👋 {n(sys.id)} left</span>;case 'user_kicked':return <span className="italic text-[#F84848]">👢 {n(sys.id)} kicked by {n(sys.by)}</span>;case 'user_banned':return <span className="italic text-[#F84848]">🔨 {n(sys.id)} banned by {n(sys.by)}</span>;case 'channel_renamed':return <span className="italic text-[#4799F0]">✏️ {n(sys.by)} renamed to <strong>{sys.name}</strong></span>;case 'channel_description_changed':return <span className="italic text-[#4799F0]">✏️ {n(sys.by)} changed channel description</span>;case 'channel_icon_changed':return <span className="italic text-[#4799F0]">🖼️ {n(sys.by)} changed channel icon</span>;case 'channel_ownership_changed':return <span className="italic text-[#F39F00]">👑 Ownership transferred to {n(sys.to)}</span>;case 'message_pinned':return <span className="italic text-[#3ABF7E]">📌 {n(sys.by)} pinned a message</span>;case 'message_unpinned':return <span className="italic text-[#80848e]">📌 {n(sys.by)} unpinned a message</span>;case 'call_started':return <span className="italic text-[#3ABF7E]">📞 {n(sys.by||sys.id)} started a call</span>;default:return <span className="italic text-[#80848e]">[{sys.type}]</span>;}};
 
 // ─── URL Embed ────────────────────────────────────────────────────────────────
 const UrlEmbed=memo(({embed,openLink})=>{if(!embed)return null;const{type,url,title,description,image,colour,site_name}=embed;if(type==='Image')return <button className="block mt-2 cursor-zoom-in" onClick={()=>openLink('lightbox:'+embed.url)} type="button"><LazyImg src={embed.url} alt="" className="max-h-64 max-w-xs rounded-md object-contain border border-[#2f3237]"/></button>;if(type==='Website'||type==='Text')return(<div className="mt-2 rounded rounded-l-none border-l-4 bg-[#2b2d31] p-3 max-w-sm" style={{borderColor:colour||'#4f4f4f'}}>{site_name&&<p className="text-[11px] text-[#80848e] mb-1">{site_name}</p>}{title&&<a className="text-[13px] font-semibold text-[#6ee7b7] hover:underline block" href={url} onClick={e=>{e.preventDefault();openLink(url);}} rel="noreferrer" target="_blank">{title}</a>}{description&&<p className="text-[12px] text-[#b5bac1] mt-1 line-clamp-3">{description}</p>}{image?.url&&<LazyImg src={image.url} alt="" className="mt-2 max-h-40 w-full rounded object-cover"/>}</div>);return null;});
@@ -329,7 +331,7 @@ const EmojiGifPicker = memo(({ ceById, allCE, cdn, onEmoji, onCE, onGif, token }
 EmojiGifPicker.displayName='EmojiGifPicker';
 
 // ─── Message component ────────────────────────────────────────────────────────
-function Message({message,users,channels,me,onUser,cdn,onReact,onReply,replyTarget,jumpTo,regRef,ceById,reactOpts,openLink,onEdit,onDelete,replyMap,grouped}){
+function Message({message,users,channels,me,onUser,cdn,onReact,onReply,replyTarget,jumpTo,regRef,ceById,reactOpts,openLink,onEdit,onDelete,onPin,replyMap,grouped,roles}){
   const masq=message.masquerade;
   const authorId=typeof message.author==='string'?message.author:message.author?._id;
   const base=users[authorId]||(typeof message.author==='object'?message.author:null)||{_id:authorId,username:'Unknown'};
@@ -360,7 +362,7 @@ function Message({message,users,channels,me,onUser,cdn,onReact,onReply,replyTarg
     if(!message.content)return null;
     const tr=message.content.trim();
     const big=/^(\s*(?::[A-Z0-9]{26}:|[\uD800-\uDBFF][\uDC00-\uDFFF]|[^\S\r\n])+\s*)$/i.test(tr)&&tr.length<80;
-    return <p className={`whitespace-pre-wrap break-words leading-[1.375] ${big?'text-4xl':'text-[15px] text-[#dcddde]'}`}>{renderContent(message.content,users,channels,onUser,ceById,cdn,openLink)}</p>;
+    return <p className={`whitespace-pre-wrap break-words leading-[1.375] ${big?'text-4xl':'text-[15px] text-[#dcddde]'}`}>{renderContent(message.content,users,channels,onUser,ceById,cdn,openLink,roles)}</p>;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[message.content,message.edited,cdn]);
 
@@ -403,6 +405,7 @@ function Message({message,users,channels,me,onUser,cdn,onReact,onReply,replyTarg
         <div className="flex items-center bg-[#232428] border border-[#1e1f22] rounded-lg shadow-xl overflow-hidden">
           <button className="px-2.5 py-1.5 text-[#b5bac1] hover:text-[#f2f3f5] hover:bg-[#35373c] flex items-center gap-1 transition-colors" onClick={()=>onReply(message)}><Reply size={14}/><span className="text-[11px] hidden sm:inline">Reply</span></button>
           <button className="px-2.5 py-1.5 text-[#b5bac1] hover:text-[#f2f3f5] hover:bg-[#35373c] border-l border-[#1e1f22] transition-colors text-base leading-none" onClick={()=>setPicker(p=>!p)}>😊</button>
+          {onPin&&<button className={`px-2.5 py-1.5 hover:bg-[#35373c] border-l border-[#1e1f22] transition-colors ${message.pinned?'text-[#3ABF7E] hover:text-[#2da066]':'text-[#b5bac1] hover:text-[#f2f3f5]'}`} onClick={()=>onPin(message._id,!!message.pinned)} title={message.pinned?'Unpin message':'Pin message'}><Pin size={14}/></button>}
           {mine&&<><button className="px-2.5 py-1.5 text-[#b5bac1] hover:text-[#f2f3f5] hover:bg-[#35373c] border-l border-[#1e1f22] transition-colors" onClick={()=>{setEditVal(message.content||'');setEditing(true);setPicker(false);}}><Edit2 size={14}/></button><button className="px-2.5 py-1.5 text-[#b5bac1] hover:text-[#F84848] hover:bg-[#35373c] border-l border-[#1e1f22] transition-colors" onClick={()=>onDelete(message)}><Trash2 size={14}/></button></>}
         </div>
       </div>
@@ -427,8 +430,9 @@ function Message({message,users,channels,me,onUser,cdn,onReact,onReply,replyTarg
 const MemoMsg = memo(Message, (p,n)=>
   p.message._id===n.message._id&&p.message.content===n.message.content&&
   p.message.edited===n.message.edited&&p.message.reactions===n.message.reactions&&
-  p.message.attachments===n.message.attachments&&p.grouped===n.grouped&&
-  p.replyTarget===n.replyTarget&&p.me===n.me&&p.cdn===n.cdn
+  p.message.attachments===n.message.attachments&&p.message.pinned===n.message.pinned&&
+  p.message.embeds===n.message.embeds&&p.grouped===n.grouped&&
+  p.replyTarget===n.replyTarget&&p.me===n.me&&p.cdn===n.cdn&&p.roles===n.roles
 );
 MemoMsg.displayName='MemoMsg';
 
@@ -510,7 +514,7 @@ const FriendRow=memo(({f,cdn,channels,auth,unreadChannels,openDm,removeFriend,se
 FriendRow.displayName='FriendRow';
 
 // ─── User Settings Panel ──────────────────────────────────────────────────────
-const UserSettingsPanel=({user,cdn,apiUrl,token,onUpdate,addToast,isLowSpec,openStatus,fetchProfile})=>{
+const UserSettingsPanel=({user,cdn,apiUrl,token,onUpdate,addToast,isLowSpec,openStatus,fetchProfile,unameNew,setUnameNew,unamePw,setUnamePw,unameLoading,setUnameLoading})=>{
   const[tab,setTab]=useState('profile');
   const[dn,setDn]=useState(user?.display_name||user?.username||'');
   const[bio,setBio]=useState(user?.profile?.content||'');
@@ -554,6 +558,7 @@ const UserSettingsPanel=({user,cdn,apiUrl,token,onUpdate,addToast,isLowSpec,open
         </div>}
         {tab==='account'&&<div className="space-y-5">
           <div><div className="text-xs font-bold uppercase tracking-widest text-[#80848e] mb-2">Status</div><button className="rounded-md bg-[#35373c] px-4 py-2 text-sm text-[#b5bac1] hover:bg-[#404249] transition-colors" onClick={openStatus}>Set Status…</button></div>
+          <div className="border-t border-[#1e1f22] pt-4"><div className="text-xs font-bold uppercase tracking-widest text-[#80848e] mb-3">Change Username</div><div className="space-y-2"><div><label className="text-xs text-[#80848e] block mb-0.5">New Username</label><input className={inp} value={unameNew||''} onChange={e=>setUnameNew(e.target.value)} placeholder="New username" autoComplete="username"/></div><div><label className="text-xs text-[#80848e] block mb-0.5">Current Password</label><input className={inp} type="password" value={unamePw||''} onChange={e=>setUnamePw(e.target.value)} autoComplete="current-password"/></div></div><button className="mt-3 rounded-md bg-[#3ABF7E] px-4 py-2 text-sm font-bold text-white hover:bg-[#2da066] disabled:opacity-60 transition-colors" disabled={unameLoading||!unameNew?.trim()||!unamePw} onClick={async()=>{setUnameLoading(true);try{const r=await fetch(`${apiUrl}/users/@me`,{method:'PATCH',headers:{'Content-Type':'application/json','x-session-token':token},body:JSON.stringify({username:unameNew.trim(),password:unamePw})});if(!r.ok)throw new Error((await r.json().catch(()=>({}))).description||'Failed');onUpdate(await r.json());addToast('Username updated!','success');setUnameNew('');setUnamePw('');}catch(e){addToast(e.message,'error');}finally{setUnameLoading(false);}}}>{unameLoading?'Saving…':'Change Username'}</button></div>
           <div className="border-t border-[#1e1f22] pt-4"><div className="text-xs font-bold uppercase tracking-widest text-[#80848e] mb-3">Change Password</div><div className="space-y-2">{[['Current',pwCur,setPwCur,'current-password'],['New',pwNew,setPwNew,'new-password'],['Confirm',pwConf,setPwConf,'new-password']].map(([l,v,s,ac])=><div key={l}><label className="text-xs text-[#80848e] block mb-0.5">{l}</label><input className={inp} type="password" value={v} onChange={e=>s(e.target.value)} autoComplete={ac}/></div>)}</div><button className="mt-3 rounded-md bg-[#3ABF7E] px-4 py-2 text-sm font-bold text-white hover:bg-[#2da066] disabled:opacity-60 transition-colors" disabled={pwS||!pwCur||!pwNew} onClick={changePw}>{pwS?'Saving…':'Change Password'}</button></div>
         </div>}
         {tab==='about'&&<div className="space-y-4">
@@ -627,6 +632,20 @@ function AppShell() {
   const [consent,setConsent]=useState(false);
   const [wsRetry,setWsRetry]=useState(0);
   const [isMembLoad,setIsMembLoad]=useState(false);
+  const [showSearch,setShowSearch]=useState(false);
+  const [searchQ,setSearchQ]=useState('');
+  const [searchResults,setSearchResults]=useState([]);
+  const [isSearching,setIsSearching]=useState(false);
+  const [createChName,setCreateChName]=useState('');
+  const [createChNsfw,setCreateChNsfw]=useState(false);
+  const [editChId,setEditChId]=useState(null);
+  const [editChName,setEditChName]=useState('');
+  const [editChDesc,setEditChDesc]=useState('');
+  const [kickTarget,setKickTarget]=useState(null);
+  const [banTarget,setBanTarget]=useState(null);
+  const [unameNew,setUnameNew]=useState('');
+  const [unamePw,setUnamePw]=useState('');
+  const [unameLoading,setUnameLoading]=useState(false);
 
   const profileCacheRef=useRef({}); // uid -> {content, background, bannerUrl, fetching}
 
@@ -763,7 +782,7 @@ function AppShell() {
 
   const peekMember=useMemo(()=>!peekUser?._id||selServer==='@me'?null:members[`${selServer}:${peekUser._id}`],[members,peekUser,selServer]);
   const peekRoles=useMemo(()=>!peekMember||!selSrvObj?.roles?[]:(peekMember.roles||[]).map(id=>selSrvObj.roles?.[id]).filter(Boolean),[peekMember,selSrvObj]);
-  const peekBadges=useMemo(()=>{if(!peekUser?.badges)return[];if(Array.isArray(peekUser.badges))return peekUser.badges;if(typeof peekUser.badges==='number'){const F={1:'Developer',2:'Translator',4:'Supporter',8:'Founder',16:'Moderation',32:'Active Supporter',64:'Paw'};return Object.entries(F).filter(([b])=>(peekUser.badges&Number(b))===Number(b)).map(([,l])=>l);}return[];},[peekUser]);
+  const peekBadges=useMemo(()=>{if(!peekUser?.badges)return[];if(Array.isArray(peekUser.badges))return peekUser.badges;if(typeof peekUser.badges==='number'){const F={1:'Developer',2:'Translator',4:'Supporter',8:'Responsible Disclosure',16:'Founder',32:'Platform Moderation',64:'Active Supporter',128:'Paw',256:'Early Adopter'};return Object.entries(F).filter(([b])=>(peekUser.badges&Number(b))===Number(b)).map(([,l])=>l);}return[];},[peekUser]);
   const peekBio=peekUser?.profile?.content||peekUser?.profile?.bio||peekUser?.bio||null;
 
   const catChannels=useMemo(()=>{
@@ -797,6 +816,7 @@ function AppShell() {
         setChannels(p=>{const n={...p};packet.channels?.forEach(c=>{n[c._id]=c;});return n;});
         setMembers(p=>{const n={...p};packet.members?.forEach(m=>{n[`${m._id.server}:${m._id.user}`]=m;});return n;});
         fetch(`${cfg.api}/sync/unreads`,{headers:{'x-session-token':auth.token}}).then(r=>r.ok?r.json():[]).then(list=>{if(!Array.isArray(list))return;const ids=new Set(list.map(u=>u.channel?._id||u.channel).filter(Boolean));if(ids.size)setUnread(p=>{const n=new Set(p);ids.forEach(id=>n.add(id));return n;});}).catch(()=>{});
+        fetch(`${cfg.api}/users/@me/dms`,{headers:{'x-session-token':auth.token}}).then(r=>r.ok?r.json():[]).then(dms=>{if(Array.isArray(dms))setChannels(p=>{const n={...p};dms.forEach(c=>{if(c?._id)n[c._id]=c;});return n;});}).catch(()=>{});
         setStatus('ready');break;
       case 'Bulk':packet.v?.forEach(e=>applyEvRef.current?.(e));break;
       case 'Authenticated':setStatus('authenticated');break;
@@ -826,6 +846,12 @@ function AppShell() {
       case 'ServerMemberLeave':setMembers(p=>{const n={...p};delete n[`${packet.id}:${packet.user}`];return n;});break;
       case 'UserUpdate':{const up=clrF({...usersRef.current[packet.id],...packet.data},packet.clear);setUsers(p=>({...p,[packet.id]:up}));setMembers(p=>{const keys=Object.keys(p).filter(k=>k.endsWith(':'+packet.id));if(!keys.length)return p;const n={...p};keys.forEach(k=>{if(n[k]._user)n[k]={...n[k],_user:up};});return n;});break;}
       case 'UserRelationship':setUsers(p=>({...p,[packet.user._id]:packet.user}));break;
+      case 'ServerRoleCreate':setServers(p=>{const s=p[packet.id];if(!s)return p;return{...p,[packet.id]:{...s,roles:{...(s.roles||{}),[packet.role_id]:{...packet.role,id:packet.role_id}}}};});break;
+      case 'ServerRoleUpdate':setServers(p=>{const s=p[packet.id];if(!s)return p;const ex=s.roles?.[packet.role_id]||{};return{...p,[packet.id]:{...s,roles:{...(s.roles||{}),[packet.role_id]:clrF({...ex,...packet.data},packet.clear)}}};});break;
+      case 'ServerRoleDelete':setServers(p=>{const s=p[packet.id];if(!s||!s.roles)return p;const nr={...s.roles};delete nr[packet.role_id];return{...p,[packet.id]:{...s,roles:nr}};});break;
+      case 'ChannelGroupJoin':setChannels(p=>{const ch=p[packet.id];if(!ch)return p;return{...p,[packet.id]:{...ch,recipients:[...new Set([...(ch.recipients||[]),packet.user])]}};});break;
+      case 'ChannelGroupLeave':if(packet.user===auth.uid){setChannels(p=>{const n={...p};delete n[packet.id];return n;});if(selChRef.current===packet.id)setSelChannel('friends');}else setChannels(p=>{const ch=p[packet.id];if(!ch)return p;return{...p,[packet.id]:{...ch,recipients:(ch.recipients||[]).filter(r=>r!==packet.user)}};});break;
+      case 'MessageAppend':setMessages(p=>{const ch=packet.channel||packet.id;const msgs=p[ch];if(!msgs)return p;return{...p,[ch]:msgs.map(m=>m._id===packet.id?{...m,embeds:[...(m.embeds||[]),...(packet.append?.embeds||[])],...(packet.append?.content!==undefined?{content:packet.append.content}:{})}:m)};});break;
       default:break;
     }
   };
@@ -918,6 +944,81 @@ if(aids.length)payload.attachments=aids;const r=await fetch(`${cfg.api}/channels
   const updateServer=async()=>{if(!selServer||selServer==='@me'||!editSrvName.trim())return;setUpdatingSrv(true);try{const r=await fetch(`${cfg.api}/servers/${selServer}`,{method:'PATCH',headers:{'Content-Type':'application/json','x-session-token':auth.token},body:JSON.stringify({name:editSrvName.trim()})});if(r.ok)setActiveModal(null);}catch{addToast('Failed','error');}finally{setUpdatingSrv(false);}};
   const confirmDelServer=async()=>{setDelSrvPending(false);setUpdatingSrv(true);try{await fetch(`${cfg.api}/servers/${selServer}`,{method:'DELETE',headers:{'x-session-token':auth.token}});setActiveModal(null);}catch{addToast('Failed to delete','error');}finally{setUpdatingSrv(false);}};
 
+  const pinMessage=useCallback(async(msgId,isPinned)=>{
+    if(!selChannel||selChannel==='friends')return;
+    const method=isPinned?'DELETE':'PUT';
+    try{
+      const r=await fetch(`${cfg.api}/channels/${selChannel}/messages/${msgId}/pin`,{method,headers:{'x-session-token':auth.token}});
+      if(!r.ok)throw new Error(isPinned?'Unpin failed':'Pin failed');
+      setMessages(p=>({...p,[selChannel]:(p[selChannel]||[]).map(m=>m._id===msgId?{...m,pinned:!isPinned}:m)}));
+      addToast(isPinned?'Message unpinned':'Message pinned!','success');
+    }catch(e){addToast(e.message,'error');}
+  },[auth.token,cfg.api,selChannel]);
+
+  const kickMember=useCallback(async(userId)=>{
+    if(!selServer||selServer==='@me')return;
+    try{
+      const r=await fetch(`${cfg.api}/servers/${selServer}/members/${userId}`,{method:'DELETE',headers:{'x-session-token':auth.token}});
+      if(!r.ok)throw new Error('Kick failed');
+      setMembers(p=>{const n={...p};delete n[`${selServer}:${userId}`];return n;});
+      addToast('Member kicked','success');
+    }catch(e){addToast(e.message,'error');}
+    finally{setKickTarget(null);}
+  },[auth.token,cfg.api,selServer]);
+
+  const banMember=useCallback(async(userId)=>{
+    if(!selServer||selServer==='@me')return;
+    try{
+      const r=await fetch(`${cfg.api}/servers/${selServer}/bans/${userId}`,{method:'PUT',headers:{'Content-Type':'application/json','x-session-token':auth.token},body:JSON.stringify({reason:''})});
+      if(!r.ok)throw new Error('Ban failed');
+      setMembers(p=>{const n={...p};delete n[`${selServer}:${userId}`];return n;});
+      addToast('Member banned','success');
+    }catch(e){addToast(e.message,'error');}
+    finally{setBanTarget(null);}
+  },[auth.token,cfg.api,selServer]);
+
+  const createServerChannel=async()=>{
+    if(!createChName.trim()||!selServer||selServer==='@me')return;
+    try{
+      const r=await fetch(`${cfg.api}/servers/${selServer}/channels`,{method:'POST',headers:{'Content-Type':'application/json','x-session-token':auth.token},body:JSON.stringify({channel_type:'Text',name:createChName.trim(),nsfw:createChNsfw})});
+      if(!r.ok)throw new Error('Failed to create channel');
+      setCreateChName('');setCreateChNsfw(false);setActiveModal(null);
+      addToast('Channel created!','success');
+    }catch(e){addToast(e.message,'error');}
+  };
+
+  const saveChannelEdit=async()=>{
+    if(!editChId||!editChName.trim())return;
+    try{
+      const r=await fetch(`${cfg.api}/channels/${editChId}`,{method:'PATCH',headers:{'Content-Type':'application/json','x-session-token':auth.token},body:JSON.stringify({name:editChName.trim(),description:editChDesc||null})});
+      if(!r.ok)throw new Error('Failed to update channel');
+      setActiveModal(null);setEditChId(null);
+      addToast('Channel updated!','success');
+    }catch(e){addToast(e.message,'error');}
+  };
+
+  const deleteChannelById=async(chId)=>{
+    try{
+      const r=await fetch(`${cfg.api}/channels/${chId}`,{method:'DELETE',headers:{'x-session-token':auth.token}});
+      if(!r.ok)throw new Error('Failed to delete channel');
+      addToast('Channel deleted','success');
+    }catch(e){addToast(e.message,'error');}
+  };
+
+  const searchMessages=useCallback(async(query)=>{
+    if(!query.trim()||!selChannel||selChannel==='friends')return;
+    setIsSearching(true);
+    try{
+      const r=await fetch(`${cfg.api}/channels/${selChannel}/messages?query=${encodeURIComponent(query.trim())}&limit=25`,{headers:{'x-session-token':auth.token}});
+      if(!r.ok)throw new Error('Search failed');
+      const data=await r.json();
+      const msgs=Array.isArray(data)?data:data.messages||[];
+      upsertFromMsgs(msgs);
+      setSearchResults(msgs.sort((a,b)=>b._id>a._id?1:-1));
+    }catch(e){addToast(e.message,'error');setSearchResults([]);}
+    finally{setIsSearching(false);}
+  },[auth.token,cfg.api,selChannel,upsertFromMsgs]);
+
   const sendFriendReq=async(username)=>{if(!username?.trim())return;try{const r=await fetch(`${cfg.api}/users/${username}/friend`,{method:'PUT',headers:{'x-session-token':auth.token}});if(!r.ok)throw new Error((await r.json().catch(()=>({}))).description||'User not found');const d=await r.json();if(d?._id)upsertUsers([d]);addToast('Friend request sent!','success');}catch(err){addToast(err.message,'error');}};
   const removeFriend=async(uid)=>{try{const r=await fetch(`${cfg.api}/users/${uid}/friend`,{method:'DELETE',headers:{'x-session-token':auth.token}});if(r.ok){const d=await r.json();if(d?._id)upsertUsers([d]);}}catch{}};
   const acceptFriend=async(uid)=>{try{const r=await fetch(`${cfg.api}/users/${uid}/friend`,{method:'PUT',headers:{'x-session-token':auth.token}});if(!r.ok)throw new Error('Failed');const d=await r.json();if(d?._id)upsertUsers([d]);addToast('Accepted!','success');}catch(err){addToast(err.message,'error');}};
@@ -938,11 +1039,13 @@ if(aids.length)payload.attachments=aids;const r=await fetch(`${cfg.api}/channels
   const renderMemberItem=useCallback((item)=>{
     if(item.type==='header')return <div className="flex items-end px-3 pb-1 text-[11px] font-bold uppercase tracking-widest text-[#80848e] h-full">{item.name} — {item.count}</div>;
     const m=item.data;const mu=m.user||{_id:m?._id?.user,username:'…'};const uid=mu._id||m._id?.user;
-    return <button className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-[#35373c] h-full transition-colors" onClick={()=>setPeekUser({...(usersRef.current[uid]||mu),_id:uid})}>
-      <div className="relative shrink-0"><Avatar user={mu} cdn={cfg.cdn} size="sm"/><PresenceDot uid={uid}/></div>
+    const canMod=isOwner&&uid!==auth.uid;
+    return <div className="flex items-center group rounded-md px-2 py-1.5 hover:bg-[#35373c] h-full transition-colors cursor-pointer" onClick={()=>setPeekUser({...(usersRef.current[uid]||mu),_id:uid})}>
+      <div className="relative shrink-0 mr-2"><Avatar user={mu} cdn={cfg.cdn} size="sm"/><PresenceDot uid={uid}/></div>
       <div className="min-w-0 flex-1"><div className="truncate text-[13px] font-medium leading-tight" style={{color:m.color||'#f2f3f5'}}>{m.nickname||mu.display_name||mu.username||'…'}</div>{mu.status?.text&&<div className="text-[11px] text-[#80848e] truncate leading-tight mt-0.5">{mu.status.text}</div>}</div>
-    </button>;
-  },[cfg.cdn,PresenceDot]);
+      {canMod&&<div className="hidden group-hover:flex gap-0.5 shrink-0 ml-1" onClick={e=>e.stopPropagation()}><button className="p-1 rounded text-[#80848e] hover:text-[#F39F00] hover:bg-[#404249]" title="Kick" onClick={()=>setKickTarget(uid)}><UserMinus size={12}/></button><button className="p-1 rounded text-[#80848e] hover:text-[#F84848] hover:bg-[#404249]" title="Ban" onClick={()=>setBanTarget(uid)}><UserX size={12}/></button></div>}
+    </div>;
+  },[cfg.cdn,PresenceDot,isOwner,auth.uid]);
 
   // ── Loading / Login ────────────────────────────────────────────────────────
   if(view==='loading')return <div className="grid h-screen place-items-center bg-[#1e1f22]"><div className="flex flex-col items-center gap-3"><img src="/ermine-logo.png" className="w-20 h-20 rounded-2xl animate-pulse" alt="Ermine"/><span className="text-[#80848e] text-sm">Loading Ermine…</span></div></div>;
@@ -973,12 +1076,16 @@ if(aids.length)payload.attachments=aids;const r=await fetch(`${cfg.api}/channels
       {lightboxUrl&&<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 cursor-zoom-out" onClick={()=>setLightboxUrl(null)}><div className="relative p-4" onClick={e=>e.stopPropagation()}><img src={lightboxUrl} alt="" className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl" style={{cursor:'default'}}/><button className="absolute -top-2 -right-2 rounded-full bg-[#232428] border border-[#35373c] p-1.5 text-[#b5bac1] hover:text-white" onClick={()=>setLightboxUrl(null)}><X size={14}/></button><a href={lightboxUrl} target="_blank" rel="noreferrer" className="absolute -bottom-7 left-1/2 -translate-x-1/2 text-xs text-[#80848e] hover:text-[#b5bac1]" onClick={e=>e.stopPropagation()}>Open original ↗</a></div></div>}
       {linkUrl&&<Modal onClose={()=>setLinkUrl(null)} title="Open link?"><div className="rounded-lg bg-[#1e1f22] p-3"><p className="text-xs text-[#80848e] mb-1">Do you trust this link?</p><p className="break-all text-sm text-[#6ee7b7]">{linkUrl}</p></div><div className="grid grid-cols-2 gap-2"><button className="rounded-md bg-[#35373c] py-2 text-sm text-[#b5bac1] hover:bg-[#404249]" onClick={()=>setLinkUrl(null)}>Cancel</button><button className="rounded-md bg-[#3ABF7E] py-2 text-sm font-bold text-white hover:bg-[#2da066]" onClick={()=>{window.open(linkUrl,'_blank','noopener,noreferrer');setLinkUrl(null);}}>Open</button></div></Modal>}
       {activeModal==='create-server'&&<Modal onClose={()=>setActiveModal(null)} title="Create a Space"><input className={inp} placeholder="Space name" value={createSrvName} onChange={e=>setCreateSrvName(e.target.value)} autoFocus onKeyDown={e=>e.key==='Enter'&&createServer()}/><button className="w-full rounded-md bg-[#3ABF7E] py-2 text-sm font-bold text-white hover:bg-[#2da066] disabled:opacity-60" disabled={!createSrvName.trim()} onClick={createServer}>Create Space</button></Modal>}
+      {activeModal==='create-channel'&&selServer!=='@me'&&<Modal onClose={()=>setActiveModal(null)} title="Create Channel"><label className="text-xs font-bold uppercase tracking-widest text-[#80848e] block mb-1">Channel Name</label><input className={inp} placeholder="new-channel" value={createChName} onChange={e=>setCreateChName(e.target.value.toLowerCase().replace(/\s/g,'-'))} autoFocus onKeyDown={e=>e.key==='Enter'&&createServerChannel()}/><label className="flex items-center gap-2 text-sm text-[#b5bac1] cursor-pointer mt-1"><input type="checkbox" className="accent-[#3ABF7E]" checked={createChNsfw} onChange={e=>setCreateChNsfw(e.target.checked)}/> Age-restricted (NSFW)</label><button className="w-full rounded-md bg-[#3ABF7E] py-2 text-sm font-bold text-white hover:bg-[#2da066] disabled:opacity-60" disabled={!createChName.trim()} onClick={createServerChannel}>Create Channel</button></Modal>}
+      {activeModal==='edit-channel'&&editChId&&<Modal onClose={()=>{setActiveModal(null);setEditChId(null);}} title="Edit Channel"><label className="text-xs font-bold uppercase tracking-widest text-[#80848e] block mb-1">Channel Name</label><input className={inp} value={editChName} onChange={e=>setEditChName(e.target.value)} autoFocus onKeyDown={e=>e.key==='Enter'&&saveChannelEdit()}/><label className="text-xs font-bold uppercase tracking-widest text-[#80848e] block mb-1 mt-2">Description</label><input className={inp} value={editChDesc} onChange={e=>setEditChDesc(e.target.value)} placeholder="Optional description"/><div className="flex gap-2 justify-end mt-1"><button className="rounded-md px-3 py-1.5 text-sm text-[#80848e] hover:text-white hover:bg-[#35373c]" onClick={()=>{setActiveModal(null);setEditChId(null);}}>Cancel</button><button className="rounded-md bg-[#3ABF7E] px-3 py-1.5 text-sm font-bold text-white hover:bg-[#2da066] disabled:opacity-60" disabled={!editChName.trim()} onClick={saveChannelEdit}>Save</button></div></Modal>}
+      {kickTarget&&<Modal onClose={()=>setKickTarget(null)} title="Kick Member"><p className="text-sm text-[#b5bac1]">Kick <strong className="text-white">{users[kickTarget]?.username||kickTarget}</strong> from this server?</p><div className="flex gap-2 justify-end"><button className="rounded-md px-3 py-1.5 text-sm text-[#80848e] hover:text-white hover:bg-[#35373c]" onClick={()=>setKickTarget(null)}>Cancel</button><button className="rounded-md bg-[#F84848] px-3 py-1.5 text-sm font-bold text-white hover:bg-[#d03030]" onClick={()=>kickMember(kickTarget)}>Kick</button></div></Modal>}
+      {banTarget&&<Modal onClose={()=>setBanTarget(null)} title="Ban Member"><p className="text-sm text-[#b5bac1]">Ban <strong className="text-white">{users[banTarget]?.username||banTarget}</strong> from this server? This will also kick them.</p><div className="flex gap-2 justify-end"><button className="rounded-md px-3 py-1.5 text-sm text-[#80848e] hover:text-white hover:bg-[#35373c]" onClick={()=>setBanTarget(null)}>Cancel</button><button className="rounded-md bg-[#F84848] px-3 py-1.5 text-sm font-bold text-white hover:bg-[#d03030]" onClick={()=>banMember(banTarget)}>Ban</button></div></Modal>}
       {activeModal==='join-server'&&<Modal onClose={()=>{setActiveModal(null);setInviteCode('');setInviteErr('');}} title="Join with Invite"><input className={inp} placeholder="Invite code" value={inviteCode} onChange={e=>setInviteCode(e.target.value)} onKeyDown={e=>e.key==='Enter'&&joinByInvite()} autoFocus/>{inviteErr&&<p className="text-xs text-[#F84848]">{inviteErr}</p>}<button className="w-full rounded-md bg-[#3ABF7E] py-2 text-sm font-bold text-white hover:bg-[#2da066] disabled:opacity-60 flex items-center justify-center gap-2" disabled={joinLoading||!inviteCode.trim()} onClick={joinByInvite}>{joinLoading?<><Loader className="animate-spin" size={14}/>Joining…</>:'Join Space'}</button></Modal>}
       {activeModal==='create-invite'&&<Modal onClose={()=>{setActiveModal(null);setInviteCreated('');setInviteErr('');}} title="Invite to Space">{!inviteCreated?<button className="w-full rounded-md bg-[#3ABF7E] py-2 text-sm font-bold text-white hover:bg-[#2da066] flex items-center justify-center gap-2" onClick={createInvite}><Link size={14}/> Create Invite</button>:<div><p className="text-xs text-[#80848e] mb-1.5">Share this code:</p><div className="flex gap-2"><code className="flex-1 rounded-md bg-[#1e1f22] px-3 py-2 text-sm text-[#3ABF7E] select-all font-mono border border-[#35373c]">{inviteCreated}</code><button className="rounded-md bg-[#3ABF7E] px-3 py-2 text-white hover:bg-[#2da066]" onClick={()=>{navigator.clipboard.writeText(inviteCreated);setCopiedInvite(true);setTimeout(()=>setCopiedInvite(false),2000);}}>{copiedInvite?<Check size={16}/>:<Copy size={16}/>}</button></div></div>}{inviteErr&&<p className="text-xs text-[#F84848]">{inviteErr}</p>}</Modal>}
       {activeModal==='pinned'&&<Modal onClose={()=>setActiveModal(null)} title={`Pinned — #${curChName}`} wide>{pinnedMsgs.length===0?<p className="text-sm text-[#80848e] text-center py-6">No pinned messages.</p>:pinnedMsgs.map(m=>{const aId=typeof m.author==='string'?m.author:m.author?._id;return <div key={m._id} className="rounded-lg bg-[#1e1f22] border border-[#35373c] p-3 hover:border-[#3ABF7E]/30"><div className="flex items-center gap-2 mb-1.5"><Avatar user={users[aId]} cdn={cfg.cdn} size="sm"/><span className="text-sm font-semibold text-white">{users[aId]?.username||'Unknown'}</span><span className="text-xs text-[#80848e] ml-auto">{fmtT(m.createdAt||m._id)}</span><button className="text-xs text-[#3ABF7E] hover:underline ml-2" onClick={()=>{setActiveModal(null);jumpTo(m._id);}}>Jump</button></div><p className="text-sm text-[#b5bac1] whitespace-pre-wrap break-words">{m.content}</p></div>;})}</Modal>}
       {activeModal==='server-settings'&&selSrvObj&&<Modal onClose={()=>setActiveModal(null)} title="Space Settings"><label className="text-xs font-bold uppercase tracking-widest text-[#80848e] block mb-1">Name</label><div className="flex gap-2"><input className={inp} value={editSrvName} onChange={e=>setEditSrvName(e.target.value)}/><button className="rounded-md bg-[#3ABF7E] px-3 text-white hover:bg-[#2da066] disabled:opacity-50" disabled={updatingSrv||!editSrvName.trim()} onClick={updateServer}><Save size={18}/></button></div>{isOwner&&<div className="border-t border-[#35373c] pt-3 mt-3"><p className="text-xs font-bold uppercase tracking-widest text-[#F84848] mb-2">Danger Zone</p><div className="flex items-center justify-between rounded-lg border border-[#F84848]/20 bg-[#F84848]/5 p-3"><div><div className="text-sm font-semibold text-white">Delete Space</div><div className="text-xs text-[#80848e]">Permanently removes this space.</div></div><button className="rounded-md bg-[#F84848] px-3 py-1.5 text-sm font-bold text-white hover:bg-[#d03030] disabled:opacity-60" disabled={updatingSrv} onClick={()=>setDelSrvPending(true)}>Delete</button></div></div>}</Modal>}
       {activeModal==='set-status'&&<Modal onClose={()=>setActiveModal(null)} title="Set Status"><div className="grid gap-1.5">{[['Online','Online','#3ABF7E'],['Idle','Idle','#F39F00'],['Busy','Do Not Disturb','#F84848'],['Focus','Focus','#4799F0'],['Invisible','Invisible','#A5A5A5']].map(([val,lbl,col])=><button key={val} className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors ${statusDraft.presence===val?'border-[#3ABF7E] bg-[#3ABF7E]/10':'border-[#35373c] bg-[#1e1f22] hover:border-[#3ABF7E]/30'}`} onClick={()=>setStatusDraft(p=>({...p,presence:val}))}><span className="w-3 h-3 rounded-full shrink-0" style={{background:col}}/><span className="text-sm text-[#f2f3f5]">{lbl}</span>{statusDraft.presence===val&&<Check size={14} className="ml-auto text-[#3ABF7E]"/>}</button>)}</div><input className={`${inp} mt-1`} maxLength={128} placeholder="Custom status…" value={statusDraft.text} onChange={e=>setStatusDraft(p=>({...p,text:e.target.value}))}/><button className="w-full rounded-md bg-[#3ABF7E] py-2 text-sm font-bold text-white hover:bg-[#2da066] disabled:opacity-60" disabled={savingSt} onClick={saveStatus}>{savingSt?'Saving…':'Save Status'}</button></Modal>}
-      {activeModal==='user-settings'&&<Modal onClose={()=>setActiveModal(null)} title="My Account" wide noPad><UserSettingsPanel user={users[auth.uid]} cdn={cfg.cdn} apiUrl={cfg.api} token={auth.token} onUpdate={u=>upsertUsers([u])} addToast={addToast} isLowSpec={isLowSpec} openStatus={()=>{setActiveModal(null);setTimeout(openStatusEditor,100);}} fetchProfile={fetchProfile}/></Modal>}
+      {activeModal==='user-settings'&&<Modal onClose={()=>setActiveModal(null)} title="My Account" wide noPad><UserSettingsPanel user={users[auth.uid]} cdn={cfg.cdn} apiUrl={cfg.api} token={auth.token} onUpdate={u=>upsertUsers([u])} addToast={addToast} isLowSpec={isLowSpec} openStatus={()=>{setActiveModal(null);setTimeout(openStatusEditor,100);}} fetchProfile={fetchProfile} unameNew={unameNew} setUnameNew={setUnameNew} unamePw={unamePw} setUnamePw={setUnamePw} unameLoading={unameLoading} setUnameLoading={setUnameLoading}/></Modal>}
       {peekUser&&<Modal onClose={()=>setPeekUser(null)} title="Profile">
         <div className="overflow-hidden rounded-xl bg-[#1e1f22]">{(peekProfile?.bannerUrl||bannerUrl(peekUser,cfg.cdn))?<img alt="" className="w-full object-cover" style={{aspectRatio:"10/3",display:"block"}} src={peekProfile?.bannerUrl||bannerUrl(peekUser,cfg.cdn)}/>:<div className="h-20 bg-gradient-to-br from-[#1a3a28] to-[#3ABF7E]"/>}
         {(()=>{const liveU=users[peekUser._id]||peekUser;const hasData=liveU.username&&liveU.username!==liveU._id?.slice(0,8);return(
@@ -1014,7 +1121,7 @@ if(aids.length)payload.attachments=aids;const r=await fetch(`${cfg.api}/channels
 
       {/* ── Channel sidebar ── */}
       <aside className={`${showMobile?'flex':'hidden'} md:flex w-60 flex-col bg-[#2b2d31] shrink-0 z-30 md:z-auto absolute md:relative h-full`}>
-        <div className="px-4 h-12 flex justify-between items-center shrink-0 bg-[#2b2d31] border-b border-black/30" style={{boxShadow:'0 1px 0 rgba(4,4,5,.2),0 1.5px 0 rgba(6,6,7,.05),0 2px 0 rgba(4,4,5,.05)'}}><div className="truncate text-[15px] font-bold text-[#f2f3f5]">{selServer==='@me'?'Direct Messages':selSrvObj?.name||'Space'}</div><div className="flex items-center gap-0.5">{isOwner&&selServer!=='@me'&&<><button onClick={()=>setActiveModal('create-invite')} className="p-1 rounded text-[#80848e] hover:text-[#b5bac1] hover:bg-[#35373c]"><Link size={14}/></button><button onClick={()=>{setEditSrvName(selSrvObj.name);setActiveModal('server-settings');}} className="p-1 rounded text-[#80848e] hover:text-[#b5bac1] hover:bg-[#35373c]"><Settings size={14}/></button></>}</div></div>
+        <div className="px-4 h-12 flex justify-between items-center shrink-0 bg-[#2b2d31] border-b border-black/30" style={{boxShadow:'0 1px 0 rgba(4,4,5,.2),0 1.5px 0 rgba(6,6,7,.05),0 2px 0 rgba(4,4,5,.05)'}}><div className="truncate text-[15px] font-bold text-[#f2f3f5]">{selServer==='@me'?'Direct Messages':selSrvObj?.name||'Space'}</div><div className="flex items-center gap-0.5">{isOwner&&selServer!=='@me'&&<><button onClick={()=>setActiveModal('create-channel')} className="p-1 rounded text-[#80848e] hover:text-[#b5bac1] hover:bg-[#35373c]" title="Create Channel"><Plus size={14}/></button><button onClick={()=>setActiveModal('create-invite')} className="p-1 rounded text-[#80848e] hover:text-[#b5bac1] hover:bg-[#35373c]" title="Create Invite"><Link size={14}/></button><button onClick={()=>{setEditSrvName(selSrvObj.name);setActiveModal('server-settings');}} className="p-1 rounded text-[#80848e] hover:text-[#b5bac1] hover:bg-[#35373c]" title="Server Settings"><Settings size={14}/></button></>}</div></div>
         <div className="px-2 pt-2 pb-1 shrink-0"><div className="flex items-center gap-1.5 rounded-md bg-[#1e1f22] px-2 py-1.5 border border-transparent focus-within:border-[#3ABF7E]/40"><Search size={12} className="text-[#80848e] shrink-0"/><input className="flex-1 bg-transparent text-xs text-[#f2f3f5] placeholder:text-[#80848e] focus:outline-none" placeholder={selServer==='@me'?'Find a DM…':'Find channel…'} value={chSearch} onChange={e=>setChSearch(e.target.value)}/>{chSearch&&<button onClick={()=>setChSearch('')}><X size={10} className="text-[#80848e] hover:text-white"/></button>}</div></div>
         <div className="flex-1 overflow-y-auto px-2 pb-2">
           {selServer==='@me'?<>
@@ -1022,9 +1129,9 @@ if(aids.length)payload.attachments=aids;const r=await fetch(`${cfg.api}/channels
             {filtDMs.map(ch=>{const label=dmLabel(ch);const rid=ch.channel_type==='DirectMessage'?(ch.recipients||[]).find(id=>id!==auth.uid):null;const hasUnread=unread.has(ch._id);return <button key={ch._id} className={`ch-item relative mb-0.5 w-full gap-2 px-2 py-1.5 text-sm ${selChannel===ch._id?'ch-active':hasUnread?'ch-unread text-[#80848e]':'text-[#80848e]'}`} onClick={()=>selectChannel(ch._id)}>{rid?<div className="relative shrink-0"><Avatar user={users[rid]} cdn={cfg.cdn} size="sm"/><span className="absolute -bottom-px -right-px w-2.5 h-2.5 rounded-full border-2 border-[#2b2d31]" style={{background:pc(users[rid]?.status?.presence)}}/></div>:<span className="text-[#80848e] shrink-0">{chIcon(ch)}</span>}<span className="truncate flex-1 text-sm">{label}</span>{hasUnread&&<span className="w-2 h-2 rounded-full bg-[#f2f3f5] shrink-0"/>}</button>;})}
           </>:(
             filtCats.map((item,i)=>{
-              if(item.type==='category'){const col=collapsedCats[item.id];return <button key={item.id} className="flex w-full items-center gap-1 px-2 pt-4 pb-1 text-left group" onClick={()=>setCollapsedCats(p=>({...p,[item.id]:!p[item.id]}))}>{col?<ChevronRight size={12} className="text-[#80848e] group-hover:text-[#b5bac1]"/>:<ChevronDown size={12} className="text-[#80848e] group-hover:text-[#b5bac1]"/>}<span className="text-[11px] font-bold uppercase tracking-widest text-[#80848e] group-hover:text-[#b5bac1] truncate">{item.title}</span></button>;}
+              if(item.type==='category'){const col=collapsedCats[item.id];return <div key={item.id} className="flex w-full items-center gap-1 px-2 pt-4 pb-1 group"><button className="flex items-center gap-1 flex-1 text-left" onClick={()=>setCollapsedCats(p=>({...p,[item.id]:!p[item.id]}))}>{col?<ChevronRight size={12} className="text-[#80848e] group-hover:text-[#b5bac1]"/>:<ChevronDown size={12} className="text-[#80848e] group-hover:text-[#b5bac1]"/>}<span className="text-[11px] font-bold uppercase tracking-widest text-[#80848e] group-hover:text-[#b5bac1] truncate">{item.title}</span></button>{isOwner&&<button className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-[#80848e] hover:text-[#b5bac1] shrink-0" onClick={e=>{e.stopPropagation();setActiveModal('create-channel');}} title="Create Channel"><Plus size={12}/></button>}</div>;}
               const ch=item.channel;const isVoice=ch.channel_type==='VoiceChannel';const hasUnread=unread.has(ch._id);
-              return <button key={ch._id} className={`ch-item relative mb-px w-full gap-1.5 px-2 py-1.5 text-sm ${isVoice?'opacity-40 cursor-not-allowed text-[#80848e]':selChannel===ch._id?'ch-active':hasUnread?'ch-unread text-[#80848e]':'text-[#80848e]'}`} onClick={()=>!isVoice&&selectChannel(ch._id)} disabled={isVoice} title={ch.name}><span className="shrink-0 w-4 h-4 flex items-center justify-center text-[#80848e]">{chIcon(ch)}</span><span className="truncate flex-1 text-sm">{ch.name||'channel'}</span>{ch.nsfw&&<span className="text-[9px] font-bold text-[#F84848] bg-[#F84848]/10 px-1 rounded">NSFW</span>}</button>;
+              return <div key={ch._id} className="group relative mb-px"><button className={`ch-item w-full gap-1.5 px-2 py-1.5 text-sm pr-14 ${isVoice?'opacity-40 cursor-not-allowed text-[#80848e]':selChannel===ch._id?'ch-active':hasUnread?'ch-unread text-[#80848e]':'text-[#80848e]'}`} onClick={()=>!isVoice&&selectChannel(ch._id)} disabled={isVoice} title={ch.name}><span className="shrink-0 w-4 h-4 flex items-center justify-center">{chIcon(ch)}</span><span className="truncate flex-1 text-sm">{ch.name||'channel'}</span>{ch.nsfw&&<span className="text-[9px] font-bold text-[#F84848] bg-[#F84848]/10 px-1 rounded">NSFW</span>}</button>{isOwner&&<div className="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover:flex gap-0.5 bg-[#35373c] rounded px-0.5"><button className="p-1 text-[#80848e] hover:text-[#b5bac1]" onClick={e=>{e.stopPropagation();setEditChId(ch._id);setEditChName(ch.name||'');setEditChDesc(ch.description||'');setActiveModal('edit-channel');}} title="Edit"><Edit2 size={11}/></button><button className="p-1 text-[#80848e] hover:text-[#F84848]" onClick={e=>{e.stopPropagation();if(confirm(`Delete #${ch.name}?`))deleteChannelById(ch._id);}} title="Delete"><Trash2 size={11}/></button></div>}</div>;
             })
           )}
         </div>
@@ -1043,8 +1150,10 @@ if(aids.length)payload.attachments=aids;const r=await fetch(`${cfg.api}/channels
       <main className="relative flex min-w-0 flex-1 flex-col bg-[#313338]">
         <header className="flex h-12 items-center justify-between border-b border-black/30 px-4 bg-[#313338] shrink-0 z-10" style={{boxShadow:'0 1px 0 rgba(4,4,5,.2),0 1.5px 0 rgba(6,6,7,.05),0 2px 0 rgba(4,4,5,.05)'}}>
           <div className="flex items-center gap-2 min-w-0"><button className="md:hidden text-[#80848e] hover:text-[#b5bac1] mr-1" onClick={()=>setShowMobile(p=>!p)}><Menu size={20}/></button><span className="text-[#80848e] shrink-0">{chIcon(channels[selChannel])}</span><span className="text-[15px] font-bold text-[#f2f3f5] truncate">{curChName}</span>{curChTopic&&<span className="hidden lg:block text-[13px] text-[#80848e] border-l border-[#35373c] pl-3 ml-1 truncate max-w-xs">{curChTopic}</span>}</div>
-          <div className="flex items-center gap-1 shrink-0">{selChannel!=='friends'&&<><button className="p-1.5 rounded text-[#80848e] hover:text-[#f2f3f5] hover:bg-[#35373c]" onClick={()=>{fetchPins(selChannel);setActiveModal('pinned');}} title="Pinned"><Pin size={18}/></button>{isOwner&&selServer!=='@me'&&<button className="p-1.5 rounded text-[#80848e] hover:text-[#f2f3f5] hover:bg-[#35373c]" onClick={()=>setActiveModal('create-invite')} title="Create Invite"><Link size={18}/></button>}</>}<div className="ml-2"><StatusBadge status={status}/></div></div>
+          <div className="flex items-center gap-1 shrink-0">{selChannel!=='friends'&&<><button className="p-1.5 rounded text-[#80848e] hover:text-[#f2f3f5] hover:bg-[#35373c]" onClick={()=>{fetchPins(selChannel);setActiveModal('pinned');}} title="Pinned"><Pin size={18}/></button>{isOwner&&selServer!=='@me'&&<button className="p-1.5 rounded text-[#80848e] hover:text-[#f2f3f5] hover:bg-[#35373c]" onClick={()=>setActiveModal('create-invite')} title="Create Invite"><Link size={18}/></button>}<button className={`p-1.5 rounded hover:bg-[#35373c] transition-colors ${showSearch?'text-[#3ABF7E]':'text-[#80848e] hover:text-[#f2f3f5]'}`} onClick={()=>{setShowSearch(p=>!p);setSearchQ('');setSearchResults([]);}} title="Search Messages"><Search size={18}/></button></>}<div className="ml-2"><StatusBadge status={status}/></div></div>
         </header>
+        {showSearch&&selChannel!=='friends'&&<div className="px-4 py-2 border-b border-black/20 bg-[#2f3136] shrink-0 flex gap-2 items-center"><Search size={13} className="text-[#80848e] shrink-0"/><input className="flex-1 bg-transparent text-sm text-[#f2f3f5] placeholder:text-[#4f5660] focus:outline-none" placeholder={`Search in #${curChName}…`} value={searchQ} autoFocus onChange={e=>setSearchQ(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')searchMessages(searchQ);if(e.key==='Escape'){setShowSearch(false);setSearchQ('');setSearchResults([]);}}}/>{isSearching&&<Loader size={13} className="animate-spin text-[#80848e] shrink-0"/>}<button className="shrink-0 text-[#80848e] hover:text-white" onClick={()=>{setShowSearch(false);setSearchQ('');setSearchResults([]);}}><X size={13}/></button></div>}
+        {showSearch&&searchResults.length>0&&<div className="border-b border-black/20 bg-[#2b2d31] max-h-64 overflow-y-auto shrink-0">{searchResults.map(m=>{const aId=typeof m.author==='string'?m.author:m.author?._id;return <button key={m._id} className="w-full flex gap-3 px-4 py-2 hover:bg-[#35373c] text-left" onClick={()=>{setShowSearch(false);setSearchQ('');setSearchResults([]);jumpTo(m._id)&&void fetchMessages(selChannel);}}><Avatar user={users[aId]} cdn={cfg.cdn} size="sm"/><div className="min-w-0 flex-1"><span className="text-xs font-semibold text-[#f2f3f5]">{users[aId]?.username||'Unknown'}</span><span className="text-[11px] text-[#80848e] ml-2">{fmtT(m.createdAt||m._id)}</span><p className="text-xs text-[#b5bac1] truncate mt-0.5">{m.content||'[attachment]'}</p></div></button>;})}  </div>}
         {voiceNotice&&<div className="mx-4 mt-2 flex items-center gap-2 rounded-lg bg-[#F39F00]/10 border border-[#F39F00]/20 px-3 py-2 text-[13px] text-[#F39F00] shrink-0"><Info size={14} className="shrink-0"/>{voiceNotice}</div>}
 
         <section className="flex-1 overflow-y-auto py-2 min-h-0" ref={scrollRef}>
@@ -1067,7 +1176,7 @@ if(aids.length)payload.attachments=aids;const r=await fetch(`${cfg.api}/channels
           ):curMsgs.length===0?(
             <div className="flex flex-col items-start justify-end h-full px-4 pb-6"><div className="mb-4 w-[72px] h-[72px] rounded-2xl bg-[#404249] flex items-center justify-center shrink-0">{channels[selChannel]?.channel_type==='DirectMessage'?<MessageSquare size={40} className="text-white"/>:<Hash size={40} className="text-white"/>}</div><h2 className="text-[32px] font-black text-[#f2f3f5] leading-tight mb-2">{channels[selChannel]?.channel_type==='DirectMessage'?`Start a conversation with ${curChName}`:`Welcome to #${curChName}!`}</h2><p className="text-base text-[#b5bac1] leading-snug">{channels[selChannel]?.channel_type==='DirectMessage'?`This is the beginning of your direct message history with ${curChName}.`:`This is the start of the #${curChName} channel.`}</p></div>
           ):(
-            curMsgs.map((msg,idx)=>{const prev=idx>0?curMsgs[idx-1]:null;const newDay=idx===0||(prev&&dayK(prev)!==dayK(msg));return <React.Fragment key={msg._id}>{newDay&&<DateSep msg={msg}/>}<MemoMsg message={msg} users={users} channels={channels} me={auth.uid} onUser={(u,id)=>setPeekUser({...u,_id:id||u._id})} cdn={cfg.cdn} onReact={toggleReaction} onReply={setReplyingTo} replyTarget={replyingTo?._id} jumpTo={jumpTo} regRef={regRef} ceById={ceById} reactOpts={reactOpts} openLink={openLink} onEdit={editMessage} onDelete={requestDelete} replyMap={replyMap} grouped={!newDay&&isGrouped(msg,prev)}/></React.Fragment>;})
+            curMsgs.map((msg,idx)=>{const prev=idx>0?curMsgs[idx-1]:null;const newDay=idx===0||(prev&&dayK(prev)!==dayK(msg));return <React.Fragment key={msg._id}>{newDay&&<DateSep msg={msg}/>}<MemoMsg message={msg} users={users} channels={channels} me={auth.uid} onUser={(u,id)=>setPeekUser({...u,_id:id||u._id})} cdn={cfg.cdn} onReact={toggleReaction} onReply={setReplyingTo} replyTarget={replyingTo?._id} jumpTo={jumpTo} regRef={regRef} ceById={ceById} reactOpts={reactOpts} openLink={openLink} onEdit={editMessage} onDelete={requestDelete} onPin={selChannel!=='friends'?pinMessage:null} replyMap={replyMap} grouped={!newDay&&isGrouped(msg,prev)} roles={selSrvObj?.roles}/></React.Fragment>;})
           )}
           <div ref={botRef}/>
         </section>
